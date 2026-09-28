@@ -15,7 +15,12 @@ var API = localStorage.getItem('grammar-api') || DEFAULT_API;
 
 function api(path){ return API.replace(/\/+$/, '') + path }
 
-function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML}
+// Escapes for text AND attribute position. textContent→innerHTML leaves double
+// quotes alone, and every server value here lands inside an attribute
+// (title="…") where harper's own messages quote the user's words — a quote in a
+// message closed the attribute early and injected the rest as markup.
+function esc(s){return String(s).replace(/[&<>"']/g,function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 var currentMatches=[],lastText='',timer=null;
 
 var ta=document.getElementById('text'),resEl=document.getElementById('results'),
@@ -78,7 +83,10 @@ async function run(){
   statsEl.textContent=text.length+' ch · '+wc+' w';
   if(!wc){resEl.innerHTML='<p class="empty">Start writing…</p>';issueEl.textContent='';return}
   issueEl.textContent='checking…';
-  var body=JSON.stringify({text:text,language:lang});
+  // level=picky asks for the style tier (wordiness, passive voice). Without it the
+  // server answers the correctness tier only, so a writing UI would lose the hints
+  // that are the reason to run a checker locally at all.
+  var body=JSON.stringify({text:text,language:lang,level:'picky'});
   var opts={method:'POST',headers:{'Content-Type':'application/json'},body:body};
   try{
     // Stats ride along with the check: they are arithmetic over the string, so
