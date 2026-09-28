@@ -22,6 +22,19 @@ requests work because grammar-server sends `Access-Control-Allow-Origin: *`.
 `Test` asks the server for its version, so you can tell "wrong URL" from
 "server down".
 
+## Install (Linux, current user)
+
+```bash
+make install
+systemctl --user enable --now grammar-ui
+```
+
+Copies the three files to `~/.local/share/grammar-ui` and installs a user unit that
+serves them on `127.0.0.1:8899` (python's stdlib server; no dependency to keep
+patched, no build step). The unit carries a soft `Wants=grammar-server.service`, so
+the pair comes up together at login. `make uninstall` reverses it, `make serve` runs
+it in the foreground for development, `make test` runs the CI gate.
+
 ## Features
 
 | | |
