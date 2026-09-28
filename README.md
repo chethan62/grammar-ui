@@ -27,6 +27,7 @@ requests work because grammar-server sends `Access-Control-Allow-Origin: *`.
 | | |
 |---|---|
 | Live checking | `/v2/check` on a 400 ms debounce, issues listed with one-click replacements |
+| Style tier | the request asks for `level=picky`, so wordiness, preferred terms (`e-mail` → `email`) and passive-voice hints appear alongside grammar |
 | Fix all | applies the first replacement of every issue, right to left |
 | Rephrase | `/v2/rewrite` — two alternatives from a local model, click one to swap it in |
 | Delivery | `/v2/stats` — words, grade level, reading time |
@@ -34,8 +35,21 @@ requests work because grammar-server sends `Access-Control-Allow-Origin: *`.
 Rephrase needs `rewrite_model` configured on the server and a running Ollama;
 without them the endpoint answers `503` and the UI shows why.
 
+## How it is checked
+
+There is no build step, so there is nothing to compile — but the escaping rule is not
+optional, because every string from the server is pasted into an HTML template, most of
+them into attributes. `test/esc.test.js` pulls `esc()` out of `app.js` and asserts it
+handles quotes, tags, ampersands and non-strings; CI runs that plus `node --check app.js`.
+
+```bash
+node test/esc.test.js
+```
+
 ## Colours
 
 Highlighting is driven by the LanguageTool category in the response
 (`TYPOS` → spelling, `GRAMMAR` → grammar, `STYLE`/`REDUNDANCY` → style), so it
 keeps working when the server adds rules.
+
+MIT licensed (see `LICENSE`).
