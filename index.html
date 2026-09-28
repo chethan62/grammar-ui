@@ -2,14 +2,19 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>grammar-server</title>
+<title>grammar-ui</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div class="app">
 <header>
-  <h1><span class="dot"></span>Grammar Server<span style="color:var(--muted);font-weight:400;font-size:.82rem"> &middot; offline</span></h1>
-  <span class="ver" id="version"></span>
+  <h1><span class="dot"></span>Grammar<span style="color:var(--muted);font-weight:400;font-size:.82rem"> &middot; offline</span></h1>
+  <div class="apibox">
+    <label for="api">API</label>
+    <input id="api" spellcheck="false" placeholder="http://localhost:8875">
+    <button class="ghost" id="testBtn" onclick="saveApi()">Test</button>
+    <span class="ver" id="version"></span>
+  </div>
 </header>
 <main>
 <div class="pane">
@@ -19,6 +24,7 @@
     <div class="toolbar">
       <select id="lang"><option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="en-CA">English (CA)</option><option value="en-AU">English (AU)</option><option value="en-IN">English (IN)</option></select>
       <button class="primary" onclick="applyAll()">Fix all</button>
+      <button class="ghost" id="rephraseBtn" onclick="rephrase()">Rephrase</button>
       <button class="ghost" onclick="copyText()">Copy text</button>
     </div>
   </div>

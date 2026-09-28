@@ -10,8 +10,10 @@ endpoints.
 ## Run it
 
 ```bash
-python3 -m http.server 8888      # or any static server, or just open index.html
+python3 -m http.server 8899      # or any static server, or just open index.html
 ```
+
+(8899 is free on this box; 8888 is held by `passt`.)
 
 Then point it at your server: the **API** field in the header defaults to
 `http://localhost:8875` and is remembered in `localStorage`. Cross-origin
