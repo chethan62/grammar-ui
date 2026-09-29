@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+"""Gate for grammar-doctor.
+
+Two halves, and the second is the point. The verdict rule is pure and asserted directly; then the
+doctor is *made to fail* by pointing it at an engine that is not there, because a diagnostic that
+cannot report a fault is worse than none — it says the chain is healthy while nothing works.
+
+Run with the system python (the one with gi); it re-execs itself like the other gates.
+"""
+
+import importlib.util
+import os
+import subprocess
+import sys
+
+try:
+    import gi  # noqa: F401
+except ImportError:
+    if not os.environ.get("GRAMMAR_TEST_REEXEC") and os.path.exists("/usr/bin/python3"):
+        os.environ["GRAMMAR_TEST_REEXEC"] = "1"
+        os.execv("/usr/bin/python3", ["/usr/bin/python3", os.path.abspath(__file__)] + sys.argv[1:])
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+DOCTOR = os.path.join(HERE, "grammar-doctor.py")
+
+PASS = 0
+FAIL = 0
+
+
+def ok(condition, message):
+    global PASS, FAIL
+    if condition:
+        PASS += 1
+        print("  ok: %s" % message)
+    else:
+        FAIL += 1
+        print("  FAIL: %s" % message)
+
+
+def load():
+    # The doctor's import guard re-execs for gi, which would replace this test process, so the
+    # module is loaded with the guard already satisfied (we are that interpreter).
+    os.environ["GRAMMAR_DOCTOR_REEXEC"] = "1"
+    spec = importlib.util.spec_from_file_location("grammar_doctor", DOCTOR)
+    if spec is None or spec.loader is None:
+        raise SystemExit("cannot load %s" % DOCTOR)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_verdict(doctor):
+    """The rule that turns rows into an exit code. Pure."""
+    ok(doctor.verdict([]), "no checks at all is not a broken chain")
+    ok(doctor.verdict([(True, True), (False, False)]),
+       "a failing *optional* check does not break the chain (rewriting is off by design)")
+    ok(not doctor.verdict([(True, True), (True, False)]),
+       "a failing essential check breaks it")
+    ok(not doctor.verdict([(True, False), (False, True)]),
+       "and it breaks it even when every optional check passes")
+    ok(doctor.verdict([(False, False), (False, False)]),
+       "only essentials are consulted")
+
+
+def run(env=None, args=()):
+    environ = dict(os.environ)
+    environ.pop("GRAMMAR_DOCTOR_REEXEC", None)      # let the child do its own re-exec
+    if env:
+        environ.update(env)
+    return subprocess.run([sys.executable, DOCTOR] + list(args),
+                          capture_output=True, text=True, env=environ, timeout=120)
+
+
+def test_it_can_fail():
+    """Point it at an engine that is not there: it must say so and exit non-zero.
+
+    This is the assertion that matters. A doctor that only ever passes would have told someone
+    their chain was healthy while they stared at an application that never suggested anything.
+    """
+    broken = run({"GRAMMAR_API": "http://127.0.0.1:9"})
+    out = broken.stdout + broken.stderr
+    ok(broken.returncode == 1, "with no engine it exits 1 (got %d)" % broken.returncode)
+    ok("FAIL" in out and "engine" in out,
+       "and it names the engine as the failure")
+    ok("no answer from http://127.0.0.1:9" in out,
+       "in the terms of what it asked: %r" % [l for l in out.splitlines() if "no answer" in l][:1])
+    # Both engine checks must fail, not just the first: the lint check reaches the same server and
+    # would otherwise report a healthy engine that cannot check anything. Counted as rows — the
+    # summary line also contains the word FAIL, which made this read 3.
+    ok(out.count("\n  FAIL") == 2,
+       "and the lint check fails with it, rather than reporting a working engine: %d failing rows"
+       % out.count("\n  FAIL"))
+
+
+def test_it_can_pass():
+    """On a machine where the chain works, it exits 0 and prints what it found."""
+    good = run()
+    out = good.stdout + good.stderr
+    ok("install" in out and "engine" in out and "bus" in out and "card" in out,
+       "it reports every part of the chain")
+    # Quiet mode is for a person who only wants to hear about problems.
+    quiet = run(args=("--quiet",))
+    quiet_out = quiet.stdout + quiet.stderr
+    ok("ok  " not in quiet_out, "quiet mode prints no ok lines: %r" % quiet_out.strip()[:60])
+    if good.returncode == 0:
+        ok("All good" in out, "and a working chain says so")
+    else:
+        ok("FAIL" in out or "warn" in out, "and a broken one says which part")
+
+
+def main():
+    doctor = load()
+    test_verdict(doctor)
+    test_it_can_fail()
+    test_it_can_pass()
+    print("grammar-doctor: %d assertions - %s" % (PASS + FAIL, "passed" if not FAIL else "FAILED"))
+    return 1 if FAIL else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

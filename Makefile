@@ -14,6 +14,7 @@ test:
 	python3 desktop/test-lookup.py
 	python3 desktop/test-watch.py
 	python3 desktop/test-popup-place.py
+	python3 desktop/test-doctor.py
 
 # Install for the current user: no sudo, and no unit ever references a checkout.
 install:
@@ -22,6 +23,7 @@ install:
 	install -m755 desktop/grammar-lookup.py $(BINDIR)/grammar-lookup
 	install -m755 desktop/grammar-watch.py $(BINDIR)/grammar-watch
 	install -m755 desktop/grammar-popup.py $(BINDIR)/grammar-popup.py
+	install -m755 desktop/grammar-doctor.py $(BINDIR)/grammar-doctor
 	install -m644 desktop/grammar-card.qml $(BINDIR)/grammar-card.qml
 	sed 's|@BINDIR@|$(BINDIR)|' deployments/grammar-lookup.desktop > $(APPDIR)/grammar-lookup.desktop
 	sed 's|@BINDIR@|$(BINDIR)|' deployments/grammar-settings.desktop > $(APPDIR)/grammar-settings.desktop

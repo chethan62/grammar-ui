@@ -16,6 +16,7 @@ the checking happens now, and the page was a second surface to keep in step.
 | `grammar-watch` | checks the sentence around your **caret** while you type, and offers a card |
 | `grammar-popup.py` | the card itself — its own process, so a card that dies cannot take the watcher with it |
 | `grammar-popup.py --settings` | the AI-runner panel: which model rephrases (also in the menu as "Choose the AI runner") |
+| `grammar-doctor` | is the whole chain working? Every silent failure this product has, named with its fix |
 
 None of them needs a browser extension, and none of them reads a DOM: they read the accessibility
 bus, the same interface a screen reader uses. That is also the limit — an application that

@@ -50,3 +50,8 @@ jobs:
           python3 -c "import PySide6; print('Qt importable:', PySide6.__version__)"
       - name: caret pop-up placement
         run: python3 desktop/test-popup-place.py
+      - name: doctor
+        # Safe here with no engine, no watcher unit and no accessibility bus: the test asserts that
+        # the doctor *reports* the truth (it is made to fail against a dead engine), not that this
+        # machine's chain is healthy.
+        run: python3 desktop/test-doctor.py
