@@ -38,7 +38,9 @@ var currentMatches=[],lastText='',timer=null;
 var ta=document.getElementById('text'),resEl=document.getElementById('results'),
     langEl=document.getElementById('lang'),statsEl=document.getElementById('inputStats'),
     issueEl=document.getElementById('issueStats'),apiEl=document.getElementById('api'),
-    verEl=document.getElementById('version');
+    verEl=document.getElementById('version'),
+    intentEl=document.getElementById('intent'),toneEl=document.getElementById('tone'),
+    levelEl=document.getElementById('level');
 
 function words(t){return t.trim().split(/\s+/).filter(Boolean).length}
 
@@ -106,7 +108,10 @@ async function run(){
   // level=picky asks for the style tier (wordiness, passive voice). Without it the
   // server answers the correctness tier only, so a writing UI would lose the hints
   // that are the reason to run a checker locally at all.
-  var body=JSON.stringify({text:text,language:lang,level:'picky'});
+  // Style hints (wordiness, passive voice) are the reason to run a checker
+  // locally at all, but they are also the noisiest part: a toggle beats editing
+  // the source when the noise gets in the way.
+  var body=JSON.stringify({text:text,language:lang,level:levelEl&&levelEl.checked?'picky':'default'});
   var opts={method:'POST',headers:{'Content-Type':'application/json'},body:body};
   try{
     // Stats ride along with the check: they are arithmetic over the string, so
@@ -214,7 +219,7 @@ async function rephrase(){
   btn.disabled=true;btn.textContent='Rephrasing…';
   try{
     var r=await fetch(api('/v2/rewrite'),{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({text:s.text,language:langEl.value})});
+      body:JSON.stringify({text:s.text,language:langEl.value,tone:toneEl.value,intent:intentEl.value})});
     if(!r.ok){throw new Error((await r.text()).replace(/^Error: /,''))}
     var d=await r.json();
     renderRephrase(s,d);
@@ -229,7 +234,7 @@ function renderRephrase(s,d){
   if(!d.candidates||!d.candidates.length)return;
   // "rephrase" on the block, so the buttons in here are never confused with a match's
   // suggestion rows (same .reps/.rep classes, different meaning, different handler).
-  var html='<div class="match rephrase"><div class="msg">Rephrase · '+esc(d.model)+' · '+d.elapsedMs+' ms</div>'+
+  var html='<div class="match rephrase"><div class="msg">Rephrase · '+esc(d.provider?d.provider+' / '+d.model:d.model)+' · '+d.elapsedMs+' ms</div>'+
     '<div class="reps">';
   // The source sentence travels with the buttons: a candidate is only valid for the
   // text it was computed from, and the text can change between the request and the
@@ -271,6 +276,12 @@ ta.addEventListener('input',function(){
   clearTimeout(timer);timer=setTimeout(run,400);
 });
 langEl.addEventListener('change',function(){run()});
+if(levelEl)levelEl.addEventListener('change',function(){run()});
+// Ctrl+Enter is the one shortcut worth having: fixing everything is the action
+// you repeat, and reaching for the mouse between sentences is the cost.
+ta.addEventListener('keydown',function(e){
+  if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();applyAll()}
+});
 
 async function fixSentence(mi){
   var m=currentMatches[mi],t=ta.value;if(!m)return;
@@ -300,3 +311,110 @@ async function fixSentence(mi){
 apiEl.value=API;
 apiEl.addEventListener('keydown',function(e){if(e.key==='Enter')saveApi()});
 saveApi();
+
+// ---- The rewrite backend -------------------------------------------------
+// The server owns the model call; this panel is its face. GET /v1/ai reports
+// what is configured, whether it answers and what models it offers; POST changes
+// it. Only loopback may POST — from the phone that is a 403 — so when the server
+// says writable:false the panel explains rather than offering dead buttons.
+var aiPanelEl=document.getElementById('aiPanel'),aiBodyEl=document.getElementById('aiBody'),
+    aiDotEl=document.getElementById('aiDot'),aiSummaryEl=document.getElementById('aiSummary'),
+    ai=null; // the last GET /v1/ai
+
+function aiDot(state){
+  aiDotEl.className='aidot'+(state==='ok'?' on':(state==='bad'?' bad':''));
+}
+function aiField(id){var e=document.getElementById(id);return e?e.value:''}
+
+async function loadAI(){
+  try{
+    var r=await fetch(api('/v1/ai'));
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    ai=await r.json();
+    renderAI(ai);
+  }catch(e){
+    ai=null;aiDot('bad');aiSummaryEl.textContent='AI backend · unavailable';
+    aiBodyEl.innerHTML='<p class="empty">'+esc(e.message)+' — this server has no /v1/ai. Set a model in its config, or update it.</p>';
+  }
+}
+
+function renderAI(st){
+  aiDot(st.reachable?'ok':'bad');
+  var name=st.provider?(st.provider+(st.model?' · '+st.model:'')):'off';
+  aiSummaryEl.textContent='AI backend · '+name+(st.reachable?'':' · not answering');
+
+  var h='<div class="airow">',i;
+  for(i=0;i<st.presets.length;i++){
+    var p=st.presets[i];
+    h+='<button class="aipick'+(p.id===st.provider?' active':'')+'" data-provider="'+esc(p.id)+'"'+(st.writable?'':' disabled')+'>'+esc(p.label)+'</button>';
+  }
+  h+='<button class="aipick'+(st.provider==='none'?' active':'')+'" data-provider="none"'+(st.writable?'':' disabled')+'>Off</button>';
+  h+='</div>';
+
+  h+='<div class="aifields">'+
+     '<label for="aiurl">URL</label><input id="aiurl" spellcheck="false" placeholder="http://127.0.0.1:11434" value="'+esc(st.url||'')+'"'+(st.writable?'':' disabled')+'>'+
+     '<label for="aimodel">Model</label><input id="aimodel" spellcheck="false" list="aimodels" value="'+esc(st.model||'')+'"'+(st.writable?'':' disabled')+'>'+
+     '<datalist id="aimodels">';
+  for(i=0;i<st.models.length;i++)h+='<option value="'+esc(st.models[i])+'">';
+  h+='</datalist><button class="primary" id="aiApply" onclick="applyAI()"'+(st.writable?'':' disabled')+'>Apply</button></div>';
+
+  h+='<div class="ainote" id="aimsg">';
+  if(!st.writable){
+    h+='Read-only from this device: the server accepts settings only from the machine it runs on.';
+  }else if(!st.provider){
+    h+='Off. Rephrase answers 503 until a backend is chosen.';
+  }else if(st.reachable){
+    h+=st.models.length?esc(st.models.length+' model'+(st.models.length===1?'':'s')+' available: '+st.models.join(', ')):'reachable, and it named no models';
+    h+=st.local?'. Local — your text stays on this machine.':'. Cloud — the sentence you rephrase leaves this machine.';
+  }else{
+    h+='Not answering at '+esc(st.url)+'. '+esc(st.hint||'');
+  }
+  if(st.keyEnv)h+=' '+(st.keySet?'Using the key in '+esc(st.keyEnv)+'.':'<b>'+esc(st.keyEnv)+' is not set</b> in the server\u2019s environment.');
+  h+='</div>';
+  if(st.hint&&st.reachable)h+='<div class="ainote">'+esc(st.hint)+'</div>';
+  aiBodyEl.innerHTML=h;
+}
+
+function pickAI(id){
+  var st=ai;if(!st)return;
+  for(var i=0;i<st.presets.length;i++){
+    var p=st.presets[i];
+    if(p.id!==id)continue;
+    // A preset carries its default URL and suggested model, so one click is
+    // usually enough: the server fills anything left blank from the same preset.
+    var u=document.getElementById('aiurl'),m=document.getElementById('aimodel');
+    if(u&&p.url)u.value=p.url;
+    if(m)m.value=p.model||'';
+  }
+  var btns=aiBodyEl.querySelectorAll('.aipick');
+  for(var j=0;j<btns.length;j++)btns[j].className='aipick'+(btns[j].getAttribute('data-provider')===id?' active':'');
+}
+
+async function applyAI(){
+  if(!ai)return;
+  var btn=document.getElementById('aiApply');
+  var pick=aiBodyEl.querySelector('.aipick.active');
+  var provider=pick?pick.getAttribute('data-provider'):ai.provider;
+  if(btn){btn.disabled=true;btn.textContent='Applying…'}
+  var msg=document.getElementById('aimsg');
+  try{
+    var r=await fetch(api('/v1/ai'),{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({provider:provider,url:aiField('aiurl'),model:aiField('aimodel')})});
+    var d=await r.json();
+    if(!r.ok){
+      if(msg)msg.innerHTML='<b>'+esc(d.error||('HTTP '+r.status))+'</b>';
+    }else{
+      ai=d;renderAI(d);aiPanelEl.open=true;
+    }
+  }catch(e){
+    if(msg)msg.innerHTML='<b>'+esc(e.message)+'</b>';
+  }
+  if(btn){btn.disabled=false;btn.textContent='Apply'}
+}
+
+aiBodyEl.addEventListener('click',function(e){
+  var b=e.target.closest('.aipick');if(!b)return;
+  pickAI(b.getAttribute('data-provider'));
+});
+aiPanelEl.addEventListener('toggle',function(){if(aiPanelEl.open)loadAI()});
+loadAI();

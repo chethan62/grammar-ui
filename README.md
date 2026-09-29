@@ -119,10 +119,45 @@ it in the foreground for development, `make test` runs the CI gate.
 | Style tier | the request asks for `level=picky`, so wordiness, preferred terms (`e-mail` → `email`) and passive-voice hints appear alongside grammar |
 | Fix all | applies the first replacement of every issue, right to left |
 | Rephrase | `/v2/rewrite` — two alternatives from a local model, click one to swap it in |
+| Rephrase intent / tone | `intent=concise\|clear\|simple` is worth using; tone usually pads a small model rather than fixing it, so it is off by default |
 | Delivery | `/v2/stats` — words, grade level, reading time |
+| AI backend panel | pick Ollama, llama.cpp server, LM Studio, vLLM, OpenRouter or any OpenAI-compatible server, and apply it without a restart |
+| Style toggle | `level=picky` (style hints) or correctness only, without editing the source |
+| Ctrl+Enter | Fix all |
 
-Rephrase needs `rewrite_model` configured on the server and a running Ollama;
-without them the endpoint answers `503` and the UI shows why.
+Rephrase needs a backend and a model; without them `/v2/rewrite` answers `503` and the
+UI says which of the two is missing.
+
+## Choosing the AI backend
+
+Rephrase is the only feature that needs a model, and which model is a setting rather
+than a rebuild. Open **AI backend** at the top of the page:
+
+- **Presets.** `ollama`, `llamacpp`, `lmstudio`, `vllm`, `openrouter`, `openai` (any
+  server speaking `/v1/chat/completions`), or **Off**. Picking one fills in its default
+  URL; the server ignores a blank model and adopts the backend's own if it offers
+  exactly one (the usual case for llama.cpp and LM Studio).
+- **Model list.** The Model field is a dropdown of what the backend actually has, read
+  from `GET /v1/models`. No guessing at names.
+- **Local vs cloud.** Local backends say *your text stays on this machine*; OpenRouter
+  and the catch-all say the sentence leaves it. An API key is read from the environment
+  variable the preset names (`OPENROUTER_API_KEY`, `OPENAI_API_KEY`) — never typed here,
+  never stored, and the panel only reports whether it is set.
+- **Read-only over the LAN.** The server accepts settings only from the machine it runs
+  on, so from your phone the panel explains that instead of offering buttons that would
+  fail. Checks still work from anywhere: it is settings that are local-only.
+
+Under the panel it is one endpoint:
+
+```bash
+curl -s localhost:8875/v1/ai                      # what is configured, and what it offers
+curl -s -X POST localhost:8875/v1/ai -H 'Content-Type: application/json' \
+     -d '{"provider":"llamacpp","url":"http://127.0.0.1:8080","model":""}'
+```
+
+The choice is saved to `~/.config/grammar-server/ai.json` and outranks the server's
+config file at startup, so a backend you picked survives a restart. A choice that could
+not be configured is never saved — a failed switch leaves the working one in place.
 
 ## How it is checked
 

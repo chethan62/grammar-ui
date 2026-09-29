@@ -16,16 +16,35 @@
     <span class="ver" id="version"></span>
   </div>
 </header>
+<!-- The rewrite backend lives on the server (it owns the model call), so this
+     panel is its face, not its implementation. Collapsed by default: checking
+     text is the job, and choosing a model is something you do once. -->
+<details class="aipanel" id="aiPanel">
+  <summary><span class="aidot" id="aiDot"></span><span id="aiSummary">AI backend</span></summary>
+  <div class="aibody" id="aiBody"><p class="empty">Loading…</p></div>
+</details>
 <main>
 <div class="pane">
   <div class="pane-head">Input <span class="stats" id="inputStats">0 ch &middot; 0 w</span></div>
   <div class="pane-body">
     <textarea id="text" placeholder="Write or paste text… live checking as you type" autofocus>This sentence have an error. teh quick brown fox</textarea>
     <div class="toolbar">
-      <select id="lang"><option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="en-CA">English (CA)</option><option value="en-AU">English (AU)</option><option value="en-IN">English (IN)</option></select>
-      <button class="primary" onclick="applyAll()">Fix all</button>
+      <select id="lang" title="Dialect"><option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="en-CA">English (CA)</option><option value="en-AU">English (AU)</option><option value="en-IN">English (IN)</option></select>
+      <button class="primary" id="fixAllBtn" onclick="applyAll()" title="Ctrl+Enter">Fix all</button>
       <button class="ghost" id="rephraseBtn" onclick="rephrase()">Rephrase</button>
-      <button class="ghost" onclick="copyText()">Copy text</button>
+      <select id="intent" title="How to rephrase">
+        <option value="">rephrase as-is</option>
+        <option value="concise">more concise</option>
+        <option value="clear">clearer</option>
+        <option value="simple">simpler</option>
+      </select>
+      <select id="tone" title="Tone (a small model pads the text rather than fixing it, so this is off by default)">
+        <option value="">no tone change</option>
+        <option value="formal">formal</option>
+        <option value="casual">casual</option>
+      </select>
+      <label class="check" title="Include style hints (wordiness, passive voice) and not just errors"><!-- style --><input type="checkbox" id="level" checked> style hints</label>
+      <button class="ghost" id="copyBtn" onclick="copyText()">Copy text</button>
     </div>
   </div>
 </div>
