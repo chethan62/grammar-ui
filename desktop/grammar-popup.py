@@ -149,14 +149,23 @@ def main():
         # get_position() still says 0 0 after a successful move (measured), while the X server
         # agrees with the request. A test that trusted get_position() would report every card as
         # misplaced.
-        gdkwin, gtk_pos = win.get_window(), win.get_position()
-        try:
-            root = gdkwin.get_root_coords(0, 0)
-        except Exception:
-            root = (0, 0)
-        print("PLACED %d %d (asked %s %s; gdk says %s %s)"
-              % (root[0], root[1], opts["x"], opts["y"], gtk_pos.root_x, gtk_pos.root_y),
-              file=sys.stderr, flush=True)
+        def report_placed():
+            """Report after the geometry settles.
+
+            Read immediately after move(), both get_position() and get_root_coords() return 0 0 —
+            they reflect what the server has confirmed, and it has not confirmed yet. Measured:
+            the X server already agrees with the request (xdotool shows Position: 900,300) while
+            GDK still says 0 0 in the same instant.
+            """
+            try:
+                root = win.get_window().get_root_coords(0, 0)
+                print("PLACED %d %d (asked %s %s)" % (root[0], root[1], opts["x"], opts["y"]),
+                      file=sys.stderr, flush=True)
+            except Exception as exc:
+                print("PLACED unknown (%s)" % exc, file=sys.stderr, flush=True)
+            return False
+
+        GLib.timeout_add(400, report_placed)
 
     GLib.timeout_add_seconds(timeout, lambda: (Gtk.main_quit(), False)[1])
     Gtk.main()
