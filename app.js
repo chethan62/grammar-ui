@@ -158,17 +158,29 @@ function applySuggestion(mi,ri){
   replaceRange(m.offset,m.offset+m.length,m.replacements[ri].value);
 }
 
-function applyAll(){
-  var t=ta.value,ms=currentMatches.slice().sort(function(a,b){return b.offset-a.offset});
-  var changed=false;
-  for(var i=0;i<ms.length;i++){
-    var m=ms[i];if(!m.replacements.length)continue;
-    var rep=m.replacements[0].value;
-    if(m.offset+m.length>t.length)continue;
-    t=t.slice(0,m.offset)+rep+t.slice(m.offset+m.length);
-    changed=true;
+// Apply every suggestion, right to left so earlier offsets stay valid, skipping the
+// ones that overlap a suggestion already applied — the same rule render() uses for
+// the highlights, which applyAll was missing. One round can uncover the next: "teh"
+// at the start of a sentence is both a misspelling and a capitalisation, and the
+// first round settles one of them, which is why one click used to leave issues
+// behind and a second click was needed. Repeat until the text stops changing.
+async function applyAll(){
+  var btn=document.querySelector('.toolbar .primary');
+  if(btn)btn.disabled=true;
+  for(var pass=0;pass<3;pass++){
+    var t=ta.value,ms=currentMatches.slice().sort(function(a,b){return b.offset-a.offset});
+    var next=t,floor=t.length,applied=false;
+    for(var i=0;i<ms.length;i++){
+      var m=ms[i];if(!m.replacements.length)continue;
+      if(m.offset+m.length>floor)continue; // overlaps a suggestion already applied
+      next=next.slice(0,m.offset)+m.replacements[0].value+next.slice(m.offset+m.length);
+      floor=m.offset;applied=true;
+    }
+    if(!applied||next===t)break;
+    ta.value=next;
+    await run();
   }
-  if(changed){ta.value=t;run()}
+  if(btn)btn.disabled=false;
 }
 
 function copyText(){
