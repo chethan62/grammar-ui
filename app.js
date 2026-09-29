@@ -248,7 +248,17 @@ async function fixSentence(mi){
     var r=await fetch(api('/v2/fix-sentence'),{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({text:t,offset:m.offset})});
     var d=await r.json();
-    if(d.fixed)replaceRange(s.start,s.end,d.fixed);
+    if(!d.fixed)return;
+    // The server says which range it fixed, and that range comes from the one
+    // sentence definition (the one /v2/stats counts with). Replacing our own guess
+    // instead is how a fix lands on a different sentence than the server meant —
+    // the two disagreed over "Dr. Smith" and "R. K. Rao". Older servers send only
+    // `fixed`, so the local sentence stays as the fallback.
+    if(typeof d.offset==='number'&&typeof d.length==='number'){
+      replaceRange(d.offset,d.offset+d.length,d.fixed);
+    }else{
+      replaceRange(s.start,s.end,d.fixed);
+    }
   }catch(ex){}
   if(btn){btn.textContent=String.fromCharCode(0x270E)+' Fix sentence';btn.disabled=false}
 }
