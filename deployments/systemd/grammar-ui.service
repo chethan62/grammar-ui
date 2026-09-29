@@ -10,7 +10,10 @@ Type=simple
 # Static files only. python3's stdlib server is the whole web server — no framework,
 # no build step, no dependency to keep patched. /usr/bin/env so the unit does not
 # hardcode a distribution's python path.
-ExecStart=/usr/bin/env python3 -m http.server 8899 --bind 127.0.0.1 --directory %h/.local/share/grammar-ui
+# --bind 0.0.0.0 so a phone on the same network can open the UI; it is static files
+# and it knows nothing about your documents, but see grammar-server.service for what
+# opening the engine to the LAN means. Use 127.0.0.1 for this one first.
+ExecStart=/usr/bin/env python3 -m http.server 8899 --bind 0.0.0.0 --directory %h/.local/share/grammar-ui
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true

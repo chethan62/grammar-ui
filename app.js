@@ -10,7 +10,12 @@
 // this file writes itself (class names from cssClass(), which is a fixed switch,
 // and the markup literals), and candidate text is read back with textContent,
 // never with innerHTML.
-var DEFAULT_API = 'http://localhost:8875';
+// The engine on the same host this page came from. Hardcoding localhost was fine while
+// only this machine used the UI; over the LAN the browser is on the phone, where
+// localhost is the phone, and the checker looks unreachable. location.hostname is the
+// machine that served the page, which is where the engine lives in every deployment.
+function apiDefault(host){ return 'http://' + (host || 'localhost') + ':8875' }
+var DEFAULT_API = apiDefault(location.hostname);
 var API = normalizeApi(localStorage.getItem('grammar-api') || DEFAULT_API);
 
 function api(path){ return API.replace(/\/+$/, '') + path }
