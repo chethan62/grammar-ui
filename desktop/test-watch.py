@@ -25,11 +25,16 @@ except ImportError:  # the agent's own python has no gi; the system one does
         os.execv("/usr/bin/python3", ["/usr/bin/python3", os.path.abspath(__file__)] + sys.argv[1:])
     gi = None
 
+Atspi = None
 if gi is not None:
-    gi.require_version("Atspi", "2.0")
-    from gi.repository import Atspi
-else:
-    Atspi = None
+    try:
+        gi.require_version("Atspi", "2.0")
+        from gi.repository import Atspi
+    except (ValueError, ImportError):
+        # gi present without the at-spi typelib — which is exactly what a plain CI runner
+        # looks like (python3-gi installed, at-spi2-core not). Not an error, not a pass:
+        # main() says it is skipping.
+        Atspi = None
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROFILE = os.path.join(tempfile.gettempdir(), "grammar-watch-test-profile")
@@ -51,7 +56,9 @@ def load(name, filename):
     return module
 
 
-watch = load("grammar_watch", "grammar-watch.py") if gi is not None else None
+# Keyed off Atspi, not gi: the watcher imports the namespace at module level, so a gi
+# without at-spi cannot even be loaded.
+watch = load("grammar_watch", "grammar-watch.py") if Atspi is not None else None
 client = watch.load_client() if watch is not None else None
 
 
@@ -288,7 +295,8 @@ def test_live():
 
 def main():
     if watch is None:
-        print("grammar-watch: skipped — no gi/at-spi bindings here (needs the system python)")
+        print("grammar-watch: skipped — no gi/at-spi bindings here (needs the system python, "
+              "or the at-spi typelib on this machine)")
         return 0
     tmp = tempfile.mkdtemp(prefix="grammar-watch-test-")
     test_window()
