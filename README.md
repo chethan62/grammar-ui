@@ -1,157 +1,128 @@
 # grammar-ui
 
-A static UI for [grammar-server](https://github.com/chethan62/grammar-server) —
-and for any LanguageTool-compatible API, since it only speaks the public
-endpoints.
+The desktop side of [grammar-server](https://github.com/chethan62/grammar-server): a selection
+checker, a typing watcher, and the suggestion card. **Python and stdlib only — nothing to build,
+no browser, no dependencies.**
 
-**No framework, no build step, no dependencies.** Three files: `index.html`,
-`app.js`, `style.css`.
+There was a browser UI here. It was removed at the user's request: the card at the caret is where
+the checking happens now, and the page was a second surface to keep in step.
 
-## Run it
+## The three pieces
 
-```bash
-python3 -m http.server 8899      # or any static server, or just open index.html
-```
+| | |
+|---|---|
+| `grammar-lookup` | checks the text you have **selected**, on **Ctrl+Alt+C** |
+| `grammar-watch` | checks the sentence around your **caret** while you type, and offers a card |
+| `grammar-popup.py` | the card itself — its own process, so a card that dies cannot take the watcher with it |
 
-(8899 is free on this box; 8888 is held by `passt`.)
+None of them needs a browser extension, and none of them reads a DOM: they read the accessibility
+bus, the same interface a screen reader uses. That is also the limit — an application that
+publishes no accessible text (most terminals, Electron apps started without
+`--force-renderer-accessibility`) cannot be served this way, because the a11y bus is the only door
+into another application's text.
 
-Then point it at your server: the **API** field in the header defaults to the host that
-served the page, port 8875 (`http://localhost:8875` on this machine, and the machine's own
-address when you opened the page from a phone), and is remembered in `localStorage`.
-Cross-origin requests work because grammar-server sends `Access-Control-Allow-Origin: *`.
+### Check a selection
 
-`Test` asks the server for its version, so you can tell "wrong URL" from
-"server down".
-
-## Check text anywhere (no browser)
-
-`grammar-lookup` checks whatever is **selected in the application you are in** — an editor,
-a chat window, a terminal, a PDF, a text field — and needs no browser:
-
-1. select the text (any app — the primary selection is what gets checked)
+1. select the text in any application (the primary selection is what gets checked)
 2. press **Ctrl+Alt+C**
-3. the findings appear in a native dialog: **Copy fixed** puts the corrected text on your
-   clipboard, **Show fixed** shows it instead, **Close** does nothing
-4. Ctrl+V replaces your selection
-
-The correction is the same one the web UI's *Fix all* produces, and it repeats until the
-text stops changing: the engine's sentence-capitalisation rule suggests `Teh` for a typo at
-the start of a sentence (it is correcting the capital, not the spelling), and only a second
-pass turns that into `The`.
-
-The dialog is `kdialog` on KDE and `zenity` elsewhere; if neither is present it falls back
-to a notification with the fix already on your clipboard. It never fails silently.
+3. the findings appear in a native dialog: **Copy fixed** puts the correction on your clipboard,
+   **Show fixed** shows it, **Close** does nothing
+4. Ctrl+V replaces the selection
 
 ```bash
-grammar-lookup                     # dialog, as the shortcut runs it
-GRAMMAR_NO_UI=1 grammar-lookup     # print the corrected text (handy in editors and scripts)
+grammar-lookup                                    # the dialog the shortcut runs
+GRAMMAR_NO_UI=1 grammar-lookup                    # print the corrected text (scripts, editors)
 GRAMMAR_API=http://cachyos.local:8875 grammar-lookup   # check against another machine
-GRAMMAR_LANG=en-GB grammar-lookup                      # check as a different language
-python3 desktop/test-lookup.py     # the gate: fix logic, dialog contract, live engine
+GRAMMAR_LANG=en-GB grammar-lookup                 # check as another language
 ```
 
-**The binding takes effect at the next login.** kglobalaccel reads `kglobalshortcutsrc`
-when it starts, so `make install` writes `Ctrl+Alt+C` for the launcher but the running
-session keeps its old set; log out and back in (or add it in System Settings → Shortcuts).
+The correction repeats until the text stops changing: the engine's sentence-capitalisation rule
+suggests `Teh` for a typo at the start of a sentence — it is correcting the capital, not the
+spelling — and only a second pass turns that into `The`.
 
-Two things it deliberately does not do. It cannot paste the fix for you: KWin does not
-implement the Wayland virtual-keyboard protocol (`wtype` says so) and `ydotoold` is not
-running, so the last Ctrl+V is yours — it does paste automatically if either becomes
-available. And it checks on demand, not while you type; that would need an input method
-(fcitx5/ibus), which is a different project.
+It cannot paste for you: KWin does not implement the Wayland virtual-keyboard protocol (`wtype`
+says so) and `ydotoold` is not running, so the last Ctrl+V is yours. It does paste automatically
+if either becomes available.
 
-## Suggest as you type (no browser, any application)
+**The shortcut takes effect at the next login** — kglobalaccel reads its config when it starts, so
+`make install` writes `Ctrl+Alt+C` but the running session keeps its old set.
 
-`grammar-watch` reads what you type through the accessibility bus — the interface a screen
-reader uses — so there is no browser extension and nothing to click. When you pause, the
-sentence around the caret is checked and a notification appears:
+### Suggestions as you type
+
+Pause for a moment and the sentence around the caret is checked. The card appears next to the
+caret:
 
 ```
+teh                                  ← large and struck through: the problem
+This word is spelled wrong.
 She go → She goes
-[Fix it] [Copy fix]
+─────────────────────────
+FIXES
+[ Teh ] [ the ] [ tea ] [ tech ]     ← every fix the engine returned; the first wears the primary style
+        [ Ignore ] [ Copy ] [ Fix sentence ]
+─────────────────────────
+REPHRASE
+We should arrange a meeting to discuss the report.   ← click one to replace the sentence
+[ tone: as-is ▾ ] [ rephrase as-is ▾ ] [ Rephrase ]
 ```
 
-**Fix it** replaces the text inside the application, through its own text interface, so the
-app records the edit the way it records typing. **Copy fix** puts the corrected sentence on
-your clipboard instead. A finding is mentioned once, not on every keystroke.
-
-```bash
-make install
-systemctl --user enable --now grammar-watch
-journalctl --user -fu grammar-watch      # what it is doing (GRAMMAR_WATCH_DEBUG=1 for more)
-```
-
-Every sentence is checked as it is written: the window is the sentence the caret is in, found
-with one bounded read per pause rather than re-reading the whole document, so an error typed
-two sentences ago was caught when you typed it. What it cannot serve is an application that
-publishes no accessible text at all — most terminals, and Electron apps started without
-`--force-renderer-accessibility`. Nothing short of an input method can, because the
-accessibility bus is the only door into another application's text.
-
-Verified against LibreOffice Writer: the document is reachable, its caret is readable, and
-the correction lands in the document. `desktop/test-watch.py` proves it by starting its own
-LibreOffice in a throwaway profile — it can never touch a document you are working on — which
-is also why that test takes about forty seconds.
+- **A chip** replaces the finding's own words. The engine returns the alternatives best-first, and
+  the first is styled as the primary one, so which fix is offered is visible rather than inferred.
+- **Fix sentence** applies every correction in the line at once, and **Copy** puts that line on the
+  clipboard. **Ignore** is a real answer and applies nothing.
+- **Rephrase** is made by the card itself, not the watcher. The card is a local process on
+  loopback and it owns the interaction, so the few seconds a small model needs are spent there
+  instead of holding up every other application's suggestions. The call runs on a thread and
+  returns through the main loop, because GTK is not thread-safe and a frozen card is worse than no
+  card. The sentence sent is the **corrected** one: handing a small model your own errors invites
+  it to preserve them.
+- The card **never takes focus**, so typing continues while it is up. That is also why Enter and
+  Escape do nothing — it receives no key events, by design. Clicking is the interaction.
+- Dismissed, it says nothing; a finding is mentioned once, and there is a 5 s cooldown between
+  offers. When no card can be placed — the application will not say where the caret is, or there
+  is no display — a notification with the same actions appears instead.
 
 ## Install (Linux, current user)
 
 ```bash
-make install
-systemctl --user enable --now grammar-ui
+make install                                  # no sudo: ~/.local/bin + the watcher unit + a launcher
+systemctl --user enable --now grammar-watch
+journalctl --user -fu grammar-watch           # what it is doing (GRAMMAR_WATCH_DEBUG=1 for more)
 ```
 
-Also installs `~/.local/bin/grammar-lookup` and its launcher entry, which is what
-Ctrl+Alt+C runs.
+`make uninstall` reverses it. No unit ever references a checkout.
 
-Copies the three files to `~/.local/share/grammar-ui` and installs a user unit that
-serves them on `0.0.0.0:8899` (python's stdlib server; no dependency to keep
-patched, no build step). It binds the LAN so a phone can open the UI; the engine is
-opened to the LAN to match, and grammar-server's README says what that costs. `--bind
-127.0.0.1` in the unit and `make install` puts it back to loopback-only. The unit carries a soft `Wants=grammar-server.service`, so
-the pair comes up together at login. `make uninstall` reverses it, `make serve` runs
-it in the foreground for development, `make test` runs the CI gate.
+## How it is checked
 
-## Features
+Three gates, all of them the scripts' own assertions — `make test` is the same thing CI runs.
 
-| | |
-|---|---|
-| Live checking | `/v2/check` on a 400 ms debounce, issues listed with one-click replacements |
-| Style tier | the request asks for `level=picky`, so wordiness, preferred terms (`e-mail` → `email`) and passive-voice hints appear alongside grammar |
-| Fix all | applies the first replacement of every issue, right to left |
-| Rephrase | `/v2/rewrite` — two alternatives from a local model, click one to swap it in |
-| Rephrase intent / tone | `intent=concise\|clear\|simple` is worth using; tone usually pads a small model rather than fixing it, so it is off by default |
-| Delivery | `/v2/stats` — words, grade level, reading time |
-| AI backend panel | pick Ollama, llama.cpp server, LM Studio, vLLM, OpenRouter or any OpenAI-compatible server, and apply it without a restart |
-| Style toggle | `level=picky` (style hints) or correctness only, without editing the source |
-| Ctrl+Enter | Fix all |
+```bash
+python3 desktop/test-lookup.py        # fix logic, dialog contract, live engine
+python3 desktop/test-watch.py         # sentence window, answer routing, listeners
+python3 desktop/test-popup-place.py   # payload, clamp(), and where the card lands
+```
 
-Rephrase needs a backend and a model; without them `/v2/rewrite` answers `503` and the
-UI says which of the two is missing.
+**The live legs are opt-in**, through `GRAMMAR_LIVE=1`:
+
+```bash
+GRAMMAR_LIVE=1 python3 desktop/test-watch.py   # drives real LibreOffice and Kate windows
+```
+
+They open real applications on the real desktop, which is their whole value — and exactly why
+they are off by default. Running the gate while someone is working types into a window and offers
+cards at them; a first version did that, and the person using the machine saw suggestion cards
+appearing for no reason of their own. Everything else runs anywhere, display or not, which is what
+lets it pass in CI.
+
+The card's placement is measured from the X server rather than from a screenshot: the card prints
+`PLACED x y (asked X Y)`, and the gate searches for its own window **by pid**, because a card
+belonging to the watcher may be on screen at the same time. KWin does not implement
+`wlr-screencopy`, so no compositor screenshot exists here to argue with.
 
 ## Choosing the AI backend
 
-Rephrase is the only feature that needs a model, and which model is a setting rather
-than a rebuild. Open **AI backend** at the top of the page:
-
-- **Presets.** `ollama`, `llamacpp`, `lmstudio`, `vllm`, `openrouter`, `openai` (any
-  server speaking `/v1/chat/completions`), or **Off**. Picking one fills in its default
-  URL; the server ignores a blank model and adopts the backend's own if it offers
-  exactly one (the usual case for llama.cpp and LM Studio).
-- **Model list.** The Model field is a dropdown of what the backend actually has, read
-  from `GET /v1/models`. No guessing at names.
-- **Local vs cloud.** Local backends say *your text stays on this machine*; OpenRouter
-  and the catch-all say the sentence leaves it. An API key is read from the environment
-  variable the preset names (`OPENROUTER_API_KEY`, `OPENAI_API_KEY`) — never typed here,
-  never stored, and the panel only reports whether it is set.
-- **Test.** One short sentence through the real endpoint, because `/v1/models` answering
-  proves the port is open, not that a model is loaded and will follow the instruction —
-  an LM Studio with nothing loaded lists models and cannot rewrite a word. The
-  milliseconds it reports tell you whether the model was warm.
-- **Read-only over the LAN.** The server accepts settings only from the machine it runs
-  on, so from your phone the panel explains that instead of offering buttons that would
-  fail. Checks still work from anywhere: it is settings that are local-only.
-
-Under the panel it is one endpoint:
+Rephrase needs a model, and which one is a setting rather than a rebuild. It is the server's
+setting, not this repo's:
 
 ```bash
 curl -s localhost:8875/v1/ai                      # what is configured, and what it offers
@@ -159,25 +130,10 @@ curl -s -X POST localhost:8875/v1/ai -H 'Content-Type: application/json' \
      -d '{"provider":"llamacpp","url":"http://127.0.0.1:8080","model":""}'
 ```
 
-The choice is saved to `~/.config/grammar-server/ai.json` and outranks the server's
-config file at startup, so a backend you picked survives a restart. A choice that could
-not be configured is never saved — a failed switch leaves the working one in place.
-
-## How it is checked
-
-There is no build step, so there is nothing to compile — but the escaping rule is not
-optional, because every string from the server is pasted into an HTML template, most of
-them into attributes. `test/esc.test.js` pulls `esc()` out of `app.js` and asserts it
-handles quotes, tags, ampersands and non-strings; CI runs that plus `node --check app.js`.
-
-```bash
-node test/esc.test.js
-```
-
-## Colours
-
-Highlighting is driven by the LanguageTool category in the response
-(`TYPOS` → spelling, `GRAMMAR` → grammar, `STYLE`/`REDUNDANCY` → style), so it
-keeps working when the server adds rules.
+`ollama`, `llamacpp`, `lmstudio`, `vllm`, `openrouter`, `openai` (any server speaking
+`/v1/chat/completions`), or off. The model list comes from the backend's own `GET /v1/models`; an
+API key is read from the environment variable the preset names and is never stored here. Settings
+are accepted only from the machine the server runs on, so a phone on the LAN can check text but
+cannot change the backend.
 
 MIT licensed (see `LICENSE`).

@@ -582,8 +582,14 @@ def main():
     test_module_loading(tmp)
     test_popup(tmp)
     test_listeners()
-    test_live()
-    test_live_qt()
+    # The live legs drive real applications on the real desktop — that is their whole value, and
+    # also why they are opt-in: running the gate while someone is working types into a window and
+    # offers cards at them. Everything above this line runs in CI without a display.
+    if os.environ.get("GRAMMAR_LIVE"):
+        test_live()
+        test_live_qt()
+    else:
+        print("  live: skipped (GRAMMAR_LIVE=1 drives real apps on this desktop)")
     print("grammar-watch: %d assertions - passed" % len(checks))
     return 0
 

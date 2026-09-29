@@ -133,7 +133,15 @@ def test_payload(popup):
 
 
 def test_live():
-    """The card in a real process, placed for real, reporting from the X server."""
+    """The card in a real process, placed for real, reporting from the X server.
+
+    Opt-in through GRAMMAR_LIVE=1. This puts a real window on the real screen, and running the
+    gate while the desktop is in use sprayed cards at the person using it. The pure assertions
+    above are the gate; this is the measurement, taken when the placement code changes.
+    """
+    if not os.environ.get("GRAMMAR_LIVE"):
+        print("  live: skipped (GRAMMAR_LIVE=1 puts a real card on screen and measures where)")
+        return
     if not os.environ.get("DISPLAY"):
         print("  live: skipped (no DISPLAY)")
         return
