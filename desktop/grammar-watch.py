@@ -115,14 +115,18 @@ def snippet_window(text, caret, back=BACK, forward=FORWARD):
 
 
 def suggestions(text, matches):
-    """Short "bad → good" lines, in document order."""
-    lines = []
+    """(old, new, reason) per finding, in document order.
+
+    Structured rather than pre-rendered, because the card shows the diff and the reason apart,
+    while a notification only has room for "old → new".
+    """
+    out = []
     for m in sorted(matches, key=lambda m: m["offset"]):
         if not m.get("replacements"):
             continue
-        bad = text[m["offset"]:m["offset"] + m["length"]].strip()
-        lines.append("%s → %s" % (bad or m["message"], m["replacements"][0]["value"]))
-    return lines
+        old = text[m["offset"]:m["offset"] + m["length"]].strip()
+        out.append((old, m["replacements"][0]["value"], m["message"].strip().replace("\n", " ")))
+    return out
 
 
 def notify_actions(summary, body, actions=(("fix", "Fix it"), ("copy", "Copy fix")), timeout=25):
@@ -139,21 +143,25 @@ def notify_actions(summary, body, actions=(("fix", "Fix it"), ("copy", "Copy fix
         return ""
 
 
-def popup_actions(summary, body, position):
-    """The pop-up next to the caret. Returns the key pressed, "" if dismissed, or None when no
-    pop-up is possible at all (no display, no GTK) — the caller then falls back to a toast.
+def popup_actions(issue, position):
+    """The card next to the caret. Returns the key pressed, "" if dismissed, or None when no card
+    is possible at all (no display, no GTK) — the caller then falls back to a toast.
 
-    Its own process, the same argv-in/word-out contract notify-send has, so nothing GTK
-    touches this daemon.
+    Its own process, the same argv-in/word-out contract notify-send has, so nothing GTK touches
+    this daemon. The issue is one dict — old, new, reason, badge, more — which is also the shape
+    a future IPC would carry, if this ever grows a second host.
     """
     script = os.path.join(HERE, "grammar-popup.py")
     if position is None or not os.path.exists(script):
         return None
+    argv = [sys.executable, script,
+            "--x", str(position[0]), "--y", str(position[1]),
+            "--old", issue.get("old", ""), "--new", issue.get("new", ""),
+            "--reason", issue.get("reason", ""), "--badge", issue.get("badge", "")]
+    if issue.get("more"):
+        argv += ["--more", issue["more"]]
     try:
-        proc = subprocess.run([sys.executable, script,
-                               "--x", str(position[0]), "--y", str(position[1]),
-                               "--label", summary, "--more", body],
-                              capture_output=True, timeout=30)
+        proc = subprocess.run(argv, capture_output=True, timeout=30)
     except subprocess.SubprocessError:
         return None
     if proc.returncode != 0:
@@ -165,11 +173,18 @@ def popup_actions(summary, body, position):
     return proc.stdout.decode().strip()
 
 
-def ask(summary, body, position=None):
-    """Show it where it belongs: at the caret when a pop-up is possible, otherwise a toast."""
-    key = popup_actions(summary, body, position)
-    if key is not None:
-        return key
+def ask(issue, position=None):
+    """Show it where it belongs: a card at the caret when there is a diff to show, else a toast.
+
+    A card with no diff is not a card — "the text changed, nothing was applied" is a message, and
+    messages belong in a notification. Same for anything without a replacement to offer.
+    """
+    if issue.get("new"):
+        key = popup_actions(issue, position)
+        if key is not None:
+            return key
+    summary = issue.get("summary") or ("%s → %s" % (issue["old"], issue["new"]))
+    body = issue.get("more") or issue.get("reason") or "Fix it to correct this in place."
     return notify_actions(summary, body)
 
 
@@ -182,6 +197,7 @@ class Watcher:
         self.timer = None
         self.busy = False
         self.last_window = None    # the text we last checked
+        self.last_engine_ms = None  # how long the engine took, for the card's badge
         self.last_notified = None  # the text we last mentioned (never nag twice)
         self.last_time = 0.0
 
@@ -254,6 +270,7 @@ class Watcher:
             debug("unchanged since the last check")
             return False
         self.last_window = piece
+        started = time.monotonic()
         try:
             matches = self.client.check(piece).get("matches", [])
         except Exception as exc:
@@ -261,7 +278,8 @@ class Watcher:
             # daemon appears to do nothing, and it is what the lookup client shouts about.
             print("grammar-watch: engine check failed: %s" % exc, file=sys.stderr, flush=True)
             return False
-        debug("matches: %d" % len(matches))
+        self.last_engine_ms = (time.monotonic() - started) * 1000.0
+        debug("matches: %d in %.0f ms" % (len(matches), self.last_engine_ms))
         if not matches:
             return False
         fixed = self.client.fix_until_stable(piece, self.client.check)
@@ -270,12 +288,18 @@ class Watcher:
         if time.monotonic() - self.last_time < self.cooldown:
             return False
         self.last_notified, self.last_time = piece, time.monotonic()
-        lines = suggestions(piece, matches)
+        found = suggestions(piece, matches)
+        old, new, reason = found[0]
+        issue = {"old": old, "new": new, "reason": reason,
+                 # The badge is the engine's real time, not a decoration: it is how the user sees
+                 # whether a suggestion is instant or cost something.
+                 "badge": "Rules engine · %d ms" % round(self.last_engine_ms or 0),
+                 "more": "; ".join("%s → %s" % (o, n) for o, n, _ in found[1:4])}
         position = self.caret_position(text, caret)
         self.busy = True
         # Off the a11y event loop: waiting for a button press must not deafen the listener.
         threading.Thread(target=self.offer, daemon=True,
-                         args=(begin + start, begin + end, piece, fixed, lines, position)).start()
+                         args=(begin + start, begin + end, piece, fixed, issue, position)).start()
         return False
 
     def caret_position(self, text, caret):
@@ -289,16 +313,15 @@ class Watcher:
             pass
         return None
 
-    def offer(self, start, end, piece, fixed, lines, position=None):
+    def offer(self, start, end, piece, fixed, issue, position=None):
         """Ask, then act — and only act on the text we actually checked."""
         try:
-            key = self.ask(lines[0] if lines else "Suggestion",
-                           "\n".join(lines[1:4]) or "Fix it to correct this in place.",
-                           position)
+            key = self.ask(issue, position)
             if key not in ("fix", "copy"):
                 return
             if not self.unchanged(start, end, piece):
-                self.ask("The text changed", "Nothing was applied. Ctrl+Alt+C checks a selection.")
+                self.ask({"old": "", "new": "", "reason": "", "summary": "The text changed",
+                          "more": "Nothing was applied. Ctrl+Alt+C checks a selection."})
                 return
             if key == "fix":
                 self.replace(start, end, fixed)

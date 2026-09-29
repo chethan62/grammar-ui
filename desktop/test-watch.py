@@ -94,11 +94,12 @@ def test_window():
 
 def test_suggestions():
     piece = "teh report is late. She go to the office."
-    lines = watch.suggestions(piece, [
+    found = watch.suggestions(piece, [
         {"offset": 24, "length": 2, "message": "verb form", "replacements": [{"value": "goes"}]},
         {"offset": 0, "length": 3, "message": "spelling", "replacements": [{"value": "Teh"}]},
     ])
-    ok(lines == ["teh → Teh", "go → goes"], "one line per finding, in order: %r" % lines)
+    ok(found == [("teh", "Teh", "spelling"), ("go", "goes", "verb form")],
+       "one (old, new, reason) per finding, in order: %r" % found)
     ok(watch.suggestions(piece, [{"offset": 0, "length": 3, "message": "m", "replacements": []}]) == [],
        "a finding with no replacement is not a suggestion")
 
@@ -240,15 +241,18 @@ def test_live():
         ok(doc is not None, "the document paragraph is reachable through a11y")
 
         calls = []
-        watcher = watch.Watcher(client, ask=lambda s, b, p=None, **k: (calls.append((s, b)), "fix")[1],
-                                cooldown=0.0)
+        watcher = watch.Watcher(
+            client, ask=lambda issue, pos=None, **k: (calls.append((issue, pos)), "fix")[1],
+            cooldown=0.0)
         watcher.target = doc
         write(doc, BAD)
 
         if take_focus(doc):
             watcher.check()
             settle(watcher, calls)
-            ok(calls and "→" in calls[0][0], "the bad sentence is reported: %r" % (calls or None))
+            ok(calls and calls[0][0]["new"], "the bad sentence is reported: %r" % (calls[:1] or None))
+            ok(calls[0][0]["badge"].endswith("ms"),
+               "the card carries a measured badge: %r" % calls[0][0]["badge"])
             ok("goes" in doc_text(doc), "Fix it was applied in the app: %r" % doc_text(doc)[:60])
             ok(doc_text(doc) == "teh report is late. She goes to the office.",
                "only the caret's sentence was touched: %r" % doc_text(doc))
@@ -286,9 +290,10 @@ def test_live():
         calls.clear()
         start, end = 0, len(BAD)
         write(doc, "Something else entirely was typed here.")
-        watcher.offer(start, end, BAD, "CLOBBERED", ["x → y"])
+        watcher.offer(start, end, BAD, "CLOBBERED", {"old": "teh", "new": "the"})
         ok(doc_text(doc).startswith("Something else"), "stale offsets are refused: %r" % doc_text(doc)[:40])
-        ok(calls and "changed" in calls[-1][0].lower(), "and the refusal is said out loud: %r" % calls)
+        ok(calls and calls[-1][0].get("summary") == "The text changed",
+           "and the refusal is said out loud, as a message: %r" % calls)
     finally:
         subprocess.run(["systemctl", "--user", "stop", UNIT], capture_output=True)
 
@@ -308,20 +313,25 @@ def test_popup(tmp):
     saved_here, saved_rec = watch.HERE, os.environ.get("REC")
     watch.HERE, os.environ["REC"] = stubdir, os.path.join(stubdir, "argv")
     try:
-        key = watch.popup_actions("go → goes", "Fix it in place.", (640, 480))
+        issue = {"old": "go", "new": "goes", "reason": "verb form",
+                 "badge": "Rules engine · 12 ms", "more": "teh → the"}
+        key = watch.popup_actions(issue, (640, 480))
         argv = open(os.environ["REC"]).read().splitlines()
         ok(key == "fix", "the pop-up's answer comes back: %r" % key)
-        ok("--label" in argv and "go → goes" in argv, "it is given the suggestion: %r" % argv)
+        ok("--old" in argv and "go" in argv and "--new" in argv and "goes" in argv,
+           "the card is given the diff: %r" % argv)
+        ok("--reason" in argv and "verb form" in argv and "--badge" in argv,
+           "and the reason and the measured badge: %r" % argv)
         ok("--x" in argv and "640" in argv and "480" in argv,
            "and the caret's coordinates: %r" % argv)
-        ok(watch.popup_actions("go → goes", "b", None) is None,
-           "no caret position: no pop-up, so the caller can use a toast")
+        ok(watch.popup_actions(issue, None) is None,
+           "no caret position: no card, so the caller can use a toast")
         # A pop-up that fails for ANY reason must mean "no pop-up", not "the user dismissed it".
         # Only exit 2 used to count, so a crash returned "" and the suggestion was dropped in silence.
         for code in (1, 2, 3, 127):
             with open(stub, "w") as fh:
                 fh.write('import sys\nprint("partial noise")\nsys.exit(%d)\n' % code)
-            result = watch.popup_actions("x → y", "b", (10, 10))
+            result = watch.popup_actions({"old": "x", "new": "y"}, (10, 10))
             ok(result is None, "exit %d means no pop-up, not a dismissal (got %r)" % (code, result))
     finally:
         watch.HERE = saved_here
@@ -338,8 +348,8 @@ def test_popup(tmp):
     saved_path = os.environ["PATH"]
     os.environ["PATH"] = tmp + ":" + saved_path
     try:
-        ok(watch.ask("go → goes", "body", None) == "copy",
-           "with no pop-up possible, the notification answers instead")
+        ok(watch.ask({"old": "go", "new": "goes", "reason": "verb form"}, None) == "copy",
+           "with no card possible, the notification answers instead")
     finally:
         os.environ["PATH"] = saved_path
 
@@ -349,6 +359,17 @@ def test_popup(tmp):
     except SystemExit:
         print("  pop-up geometry: skipped (no GTK here)")
         return
+    # The card renders the document's own text as Pango markup, so it must escape it: an '&' or
+    # '<' from the user's writing would otherwise break the label or inject markup.
+    markup = popup.card_markup("AT&T <b>", "A&T", reason="wordy phrase \"<x>\"")
+    ok("<s>AT&amp;T &lt;b&gt;</s>" in markup, "the old text is struck through and escaped: %r" % markup)
+    ok("<b>A&amp;T</b>" in markup, "the replacement is bold and escaped: %r" % markup)
+    ok("&lt;x&gt;" in markup and "<b>AT" not in markup, "the reason is escaped too: %r" % markup)
+    ok(popup.card_markup("go", "goes", badge="Rules engine · 12 ms").count("<s>go</s>") == 1,
+       "a diff carries the original once")
+    ok("Rules engine" in popup.card_markup("go", "goes", badge="Rules engine · 12 ms"),
+       "and the badge is on the card")
+
     monitors = [(0, 0, 1920, 1080)]
     ok(popup.clamp(500, 400, 200, 60, monitors) == (500, 400), "an ordinary caret stays put")
     ok(popup.clamp(1910, 1075, 200, 60, monitors) == (1720, 1020), "a corner caret is pulled in")
