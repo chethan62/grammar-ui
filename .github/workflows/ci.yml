@@ -27,3 +27,7 @@ jobs:
       # itself and says so; the sentence logic and the notification contract still run.
       - name: typing watcher
         run: python3 desktop/test-watch.py
+      - name: caret pop-up placement
+        # The clamp() assertions run anywhere; the live leg needs a display and xdotool and
+        # says so when it skips rather than passing quietly.
+        run: python3 desktop/test-popup-place.py

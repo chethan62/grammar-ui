@@ -20,6 +20,7 @@ test:
 	node test/esc.test.js
 	python3 desktop/test-lookup.py
 	python3 desktop/test-watch.py
+	python3 desktop/test-popup-place.py
 
 # Install for the current user: no sudo, and the unit never references a checkout.
 install:

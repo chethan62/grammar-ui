@@ -78,8 +78,16 @@ def clamp(x, y, w, h, monitors):
         if mx <= x < mx + mw and my <= y < my + mh:
             return (min(max(x, mx), mx + mw - w), min(max(y, my), my + mh - h))
     if monitors:
-        mx, my, mw, mh = monitors[-1]
-        return (mx + mw - w - 24, my + mh - h - 24)
+        # Nothing contains it, which happens for real: a caret can report a negative or
+        # beyond-the-edge position (a window partly off-screen, a stale AT-SPI rect). Park the
+        # card on the *nearest* monitor and pull it inside, rather than always on the last one —
+        # measured: an off-the-top-left caret put the card at 3056,936, the far corner of the
+        # other monitor, which is the one place a card is least useful.
+        def centre_distance(m):
+            mx, my, mw, mh = m
+            return (x - (mx + mw / 2)) ** 2 + (y - (my + mh / 2)) ** 2
+        mx, my, mw, mh = min(monitors, key=centre_distance)
+        return (min(max(x, mx), mx + mw - w), min(max(y, my), my + mh - h))
     return (x, y)
 
 
