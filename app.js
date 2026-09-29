@@ -11,7 +11,7 @@
 // and the markup literals), and candidate text is read back with textContent,
 // never with innerHTML.
 var DEFAULT_API = 'http://localhost:8875';
-var API = localStorage.getItem('grammar-api') || DEFAULT_API;
+var API = normalizeApi(localStorage.getItem('grammar-api') || DEFAULT_API);
 
 function api(path){ return API.replace(/\/+$/, '') + path }
 
@@ -58,10 +58,18 @@ function setStatus(text,warn){
   verEl.className='ver'+(warn?' warn':'');
 }
 
+// People type "localhost:8875", which the browser reads as the scheme "localhost:"
+// and then cannot fetch at all. One missing scheme should not look like a dead
+// server, so it is added here rather than reported as unreachable.
+function normalizeApi(v){
+  v=v.trim();
+  return v && !/^[a-z][a-z0-9+.\-]*:\/\//i.test(v) ? 'http://'+v : v;
+}
+
 // The API base is user-entered, so "Test" is the only way to tell a typo from a
 // stopped server: it asks for /status and reports what came back.
 async function saveApi(){
-  var v=apiEl.value.trim();
+  var v=normalizeApi(apiEl.value);
   if(v){API=v;localStorage.setItem('grammar-api',v)}
   apiEl.value=API;
   var btn=document.getElementById('testBtn');
