@@ -157,6 +157,77 @@ def document(app, depth=0):
     return None
 
 
+def editable_texts(app, out=None, depth=0):
+    """Every object under this app holding editable text: Text to read the caret, EditableText
+    to put a fix back. Walked by interface, not by role, because the roles differ by toolkit
+    (LibreOffice's document is a "paragraph", Kate's is a "text").
+
+    This returns all of them rather than the first: Kate exposes an editable *label* (its
+    status bar) as well as the editor, and taking the first meant this leg drove the status
+    bar while claiming to test the editor. The caller picks by role and says which it got.
+    """
+    if out is None:
+        out = []
+    if app is None or depth > 20:
+        return out
+    try:
+        if (app.get_text_iface() is not None and app.get_editable_text_iface() is not None
+                and Atspi.Text.get_character_count(app.get_text_iface()) >= 0):
+            out.append(app)
+    except Exception:
+        pass
+    try:
+        for i in range(min(app.get_child_count(), 300)):
+            editable_texts(app.get_child_at_index(i), out, depth + 1)
+    except Exception:
+        pass
+    return out
+
+
+def editable_text(app, prefer=("text", "paragraph")):
+    """The app's document view when it has one, else any editable text object.
+
+    Passing prefer, the caller can say what a document looks like in this toolkit; the
+    fallback keeps the leg useful on a toolkit whose role nobody has looked up yet, and the
+    caller reports which one it got so a fallback is never mistaken for the real thing.
+    """
+    found = editable_texts(app)
+    for role in prefer:
+        for a in found:
+            try:
+                if a.get_role_name() == role:
+                    return a
+            except Exception:
+                pass
+    return found[0] if found else None
+
+
+def start_kate():
+    """Start Kate and wait for its text view. Returns (app, process) or (None, reason).
+
+    Not systemd-run, which is how the LibreOffice leg starts soffice: a systemd-run --user
+    unit for Kate exits within milliseconds on this box (measured twice, displays passed
+    through with --setenv), while the same command launched directly starts it and it
+    appears on the accessibility bus immediately. The reason the two behave differently is
+    not established, so this leg does not pretend to know it.
+    """
+    if not shutil.which("kate"):
+        return None, "no kate on PATH"
+    proc = subprocess.Popen(["kate", "--startanon", "--new"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            start_new_session=True)
+    for _ in range(30):
+        time.sleep(1)
+        app = find_app("kate")
+        if app is not None and editable_text(app) is not None:
+            return app, proc
+        if proc.poll() is not None and app is None:
+            return None, "kate exited immediately (exit %s)" % proc.returncode
+    if find_app("kate") is None:
+        return None, "kate started but never appeared on the accessibility bus"
+    return None, "kate is on the bus but exposes no editable text object"
+
+
 def start_libreoffice():
     if not shutil.which("soffice") or not shutil.which("systemd-run"):
         return False
@@ -206,6 +277,60 @@ def settle(watcher, calls):
         if calls and not watcher.busy:
             return
         time.sleep(0.1)
+
+
+def test_live_qt():
+    """The promise is "suggests anywhere you type", and LibreOffice is one toolkit.
+
+    Qt apps publish accessibility text on this box (measured: konsole, dolphin,
+    plasmashell), but the watcher had never been driven against one, so the claim rested on
+    an inference. This asks the narrow question the promise needs: can the watcher find the
+    caret's text object in a Qt app, read its sentence, and put a fix back through the app's
+    own interface?
+    """
+    app, proc = start_kate()
+    try:
+        if app is None:
+            # Never a silent pass: say which of the reasons it was.
+            print("  qt: skipped (%s)" % proc)
+            return
+        doc = editable_text(app)
+        role = doc.get_role_name()
+        # Which object this leg drove is part of the result, not a detail: taking the first
+        # editable widget once meant driving Kate's status bar while the log said "Qt app".
+        print("  qt: driving the %r role% s%s" % (role, " " + repr(doc.get_name()) if doc.get_name() else "",
+              " — the document view" if role in ("text", "paragraph")
+              else " — NOT a document view; this run proves less than it looks like"))
+        ok(role in ("text", "paragraph"),
+           "the Qt leg found the app's document view rather than a fallback widget (got %r)" % role)
+        write(doc, BAD)
+
+        calls = []
+        watcher = watch.Watcher(
+            client, ask=lambda issue, pos=None, **k: (calls.append((issue, pos)), "fix")[1],
+            cooldown=0.0)
+        watcher.target = doc
+
+        if not take_focus(doc):
+            # Focus is the window manager's to give. Assert what does not need it: the app
+            # takes a correction through EditableText.
+            print("  qt: focus stayed with the window manager — asserting the write path only")
+            fixed = client.fix_until_stable(BAD, client.check)
+            watcher.replace(0, len(BAD), fixed)
+            ok(doc_text(doc) == FIXED, "the Qt app took the fix through EditableText: %r"
+               % doc_text(doc)[:60])
+            return
+
+        watcher.check()
+        settle(watcher, calls)
+        ok(bool(calls) and calls[0][0].get("new"),
+           "the bad sentence is reported from a Qt app: %r" % (calls[:1] or None))
+        if calls:
+            ok("goes" in doc_text(doc), "Fix it was applied in the Qt app: %r" % doc_text(doc)[:60])
+    finally:
+        if proc is not None:
+            proc.terminate()
+        subprocess.run(["pkill", "-x", "kate"], capture_output=True)
 
 
 def test_module_loading(tmp):
@@ -390,6 +515,7 @@ def main():
     test_popup(tmp)
     test_listeners()
     test_live()
+    test_live_qt()
     print("grammar-watch: %d assertions - passed" % len(checks))
     return 0
 
