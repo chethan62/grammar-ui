@@ -226,7 +226,7 @@ def test_listeners():
     """The daemon's own startup path. The GI binding wants an EventListener instance, so a
     plain function there is a TypeError that only appears when the service starts — no test
     of Watcher would ever have caught it."""
-    quiet = watch.Watcher(client, notify=lambda *a, **k: "")
+    quiet = watch.Watcher(client, ask=lambda *a, **k: "")
     ok(len(watch.listen(quiet)) == 2, "both listeners register on the accessibility bus")
     ok(quiet.target is None, "registering does not invent a target")
 
@@ -240,7 +240,7 @@ def test_live():
         ok(doc is not None, "the document paragraph is reachable through a11y")
 
         calls = []
-        watcher = watch.Watcher(client, notify=lambda s, b, **k: (calls.append((s, b)), "fix")[1],
+        watcher = watch.Watcher(client, ask=lambda s, b, p=None, **k: (calls.append((s, b)), "fix")[1],
                                 cooldown=0.0)
         watcher.target = doc
         write(doc, BAD)
@@ -293,6 +293,69 @@ def test_live():
         subprocess.run(["systemctl", "--user", "stop", UNIT], capture_output=True)
 
 
+def test_popup(tmp):
+    """The pop-up's contract: argv in, one word out, exit 2 when it cannot run at all.
+
+    Checked with a stub standing in for the pop-up script, because the real one opens a window
+    for twelve seconds — the same reason the dialog contract is checked with stubs on PATH.
+    """
+    stubdir = tempfile.mkdtemp(prefix="grammar-popup-")
+    stub = os.path.join(stubdir, "grammar-popup.py")
+    with open(stub, "w") as fh:
+        fh.write('import os, sys\n'
+                 'open(os.environ["REC"], "w").write("\\n".join(sys.argv))\n'
+                 'print("fix")\n')
+    saved_here, saved_rec = watch.HERE, os.environ.get("REC")
+    watch.HERE, os.environ["REC"] = stubdir, os.path.join(stubdir, "argv")
+    try:
+        key = watch.popup_actions("go → goes", "Fix it in place.", (640, 480))
+        argv = open(os.environ["REC"]).read().splitlines()
+        ok(key == "fix", "the pop-up's answer comes back: %r" % key)
+        ok("--label" in argv and "go → goes" in argv, "it is given the suggestion: %r" % argv)
+        ok("--x" in argv and "640" in argv and "480" in argv,
+           "and the caret's coordinates: %r" % argv)
+        ok(watch.popup_actions("go → goes", "b", None) is None,
+           "no caret position: no pop-up, so the caller can use a toast")
+        # A pop-up that fails for ANY reason must mean "no pop-up", not "the user dismissed it".
+        # Only exit 2 used to count, so a crash returned "" and the suggestion was dropped in silence.
+        for code in (1, 2, 3, 127):
+            with open(stub, "w") as fh:
+                fh.write('import sys\nprint("partial noise")\nsys.exit(%d)\n' % code)
+            result = watch.popup_actions("x → y", "b", (10, 10))
+            ok(result is None, "exit %d means no pop-up, not a dismissal (got %r)" % (code, result))
+    finally:
+        watch.HERE = saved_here
+        if saved_rec is None:
+            os.environ.pop("REC", None)
+        else:
+            os.environ["REC"] = saved_rec
+
+    # and the fallback ordering: with no position, the toast path answers
+    stub_ns = os.path.join(tmp, "notify-send")
+    with open(stub_ns, "w") as fh:
+        fh.write('#!/bin/sh\necho copy\n')
+    os.chmod(stub_ns, 0o755)
+    saved_path = os.environ["PATH"]
+    os.environ["PATH"] = tmp + ":" + saved_path
+    try:
+        ok(watch.ask("go → goes", "body", None) == "copy",
+           "with no pop-up possible, the notification answers instead")
+    finally:
+        os.environ["PATH"] = saved_path
+
+    # the position arithmetic, which is pure — an edge caret is the common case, not the exotic one
+    try:
+        popup = load("grammar_popup", "grammar-popup.py")
+    except SystemExit:
+        print("  pop-up geometry: skipped (no GTK here)")
+        return
+    monitors = [(0, 0, 1920, 1080)]
+    ok(popup.clamp(500, 400, 200, 60, monitors) == (500, 400), "an ordinary caret stays put")
+    ok(popup.clamp(1910, 1075, 200, 60, monitors) == (1720, 1020), "a corner caret is pulled in")
+    ok(popup.clamp(2500, 400, 200, 60, [(0, 0, 1920, 1080), (1920, 0, 1640, 1080)])[0] >= 1920,
+       "the pop-up follows the caret onto the second monitor")
+
+
 def main():
     if watch is None:
         print("grammar-watch: skipped — no gi/at-spi bindings here (needs the system python, "
@@ -303,6 +366,7 @@ def main():
     test_suggestions()
     test_notification(tmp)
     test_module_loading(tmp)
+    test_popup(tmp)
     test_listeners()
     test_live()
     print("grammar-watch: %d assertions - passed" % len(checks))

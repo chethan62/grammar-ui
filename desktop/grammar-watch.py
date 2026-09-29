@@ -139,12 +139,45 @@ def notify_actions(summary, body, actions=(("fix", "Fix it"), ("copy", "Copy fix
         return ""
 
 
+def popup_actions(summary, body, position):
+    """The pop-up next to the caret. Returns the key pressed, "" if dismissed, or None when no
+    pop-up is possible at all (no display, no GTK) — the caller then falls back to a toast.
+
+    Its own process, the same argv-in/word-out contract notify-send has, so nothing GTK
+    touches this daemon.
+    """
+    script = os.path.join(HERE, "grammar-popup.py")
+    if position is None or not os.path.exists(script):
+        return None
+    try:
+        proc = subprocess.run([sys.executable, script,
+                               "--x", str(position[0]), "--y", str(position[1]),
+                               "--label", summary, "--more", body],
+                              capture_output=True, timeout=30)
+    except subprocess.SubprocessError:
+        return None
+    if proc.returncode != 0:
+        # Any failure is "no pop-up" — never an empty answer, which offer() reads as a dismissal and
+        # then drops the suggestion. A pop-up that cannot start must say so in the journal.
+        print("grammar-watch: pop-up exited %d: %s"
+              % (proc.returncode, proc.stderr.decode().strip()[:200]), file=sys.stderr, flush=True)
+        return None
+    return proc.stdout.decode().strip()
+
+
+def ask(summary, body, position=None):
+    """Show it where it belongs: at the caret when a pop-up is possible, otherwise a toast."""
+    key = popup_actions(summary, body, position)
+    if key is not None:
+        return key
+    return notify_actions(summary, body)
+
+
 class Watcher:
-    def __init__(self, client, notify=notify_actions, cooldown=COOLDOWN_S, api_name="grammar"):
+    def __init__(self, client, ask=ask, cooldown=COOLDOWN_S):
         self.client = client
-        self.notify = notify
+        self.ask = ask
         self.cooldown = cooldown
-        self.api_name = api_name
         self.target = None
         self.timer = None
         self.busy = False
@@ -238,21 +271,34 @@ class Watcher:
             return False
         self.last_notified, self.last_time = piece, time.monotonic()
         lines = suggestions(piece, matches)
+        position = self.caret_position(text, caret)
         self.busy = True
         # Off the a11y event loop: waiting for a button press must not deafen the listener.
         threading.Thread(target=self.offer, daemon=True,
-                         args=(begin + start, begin + end, piece, fixed, lines)).start()
+                         args=(begin + start, begin + end, piece, fixed, lines, position)).start()
         return False
 
-    def offer(self, start, end, piece, fixed, lines):
+    def caret_position(self, text, caret):
+        """Where the caret is on screen, so the pop-up can sit next to it. None when the app
+        will not say — a notification is shown instead of a pop-up somewhere wrong."""
+        try:
+            ext = Atspi.Text.get_character_extents(text, max(0, caret), Atspi.CoordType.SCREEN)
+            if ext.width or ext.height:
+                return ext.x, ext.y + ext.height + 4     # just under the caret's line
+        except Exception:
+            pass
+        return None
+
+    def offer(self, start, end, piece, fixed, lines, position=None):
         """Ask, then act — and only act on the text we actually checked."""
         try:
-            key = self.notify(lines[0] if lines else "Suggestion",
-                              "\n".join(lines[1:4]) or "Fix it to correct this in place.")
+            key = self.ask(lines[0] if lines else "Suggestion",
+                           "\n".join(lines[1:4]) or "Fix it to correct this in place.",
+                           position)
             if key not in ("fix", "copy"):
                 return
             if not self.unchanged(start, end, piece):
-                self.notify("The text changed", "Nothing was applied. Ctrl+Alt+C checks a selection.")
+                self.ask("The text changed", "Nothing was applied. Ctrl+Alt+C checks a selection.")
                 return
             if key == "fix":
                 self.replace(start, end, fixed)
