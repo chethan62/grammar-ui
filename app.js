@@ -15,6 +15,13 @@ var API = normalizeApi(localStorage.getItem('grammar-api') || DEFAULT_API);
 
 function api(path){ return API.replace(/\/+$/, '') + path }
 
+// The Fix sentence label. An inline SVG rather than a glyph (U+270E rendered as a box
+// wherever the font stack lacks it, and it was the only icon in the UI): a vector icon
+// is the same everywhere and inherits the button's colour through currentColor.
+var FIX_ICON='<svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" aria-hidden="true" '+
+  'style="vertical-align:-1px"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 '+
+  '0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg> ';
+
 // Escapes for text AND attribute position. textContent→innerHTML leaves double
 // quotes alone, and every server value here lands inside an attribute
 // (title="…") where harper's own messages quote the user's words — a quote in a
@@ -139,7 +146,7 @@ function render(text,matches){
         html+='<button class="rep" data-mi="'+i+'" data-ri="'+j+'">'+esc(m.replacements[j].value)+'</button>';
       html+='</div>';
     }
-    html+='<button class="rep" data-fix="'+i+'" style="margin-top:.35rem;background:var(--accent);border-color:var(--accent);color:#fff">'+String.fromCharCode(0x270E)+' Fix sentence</button>';
+    html+='<button class="rep" data-fix="'+i+'" style="margin-top:.35rem;background:var(--accent);border-color:var(--accent);color:#fff">'+FIX_ICON+'Fix sentence</button>';
     html+='</div>';
   }
   resEl.innerHTML=html;
@@ -281,7 +288,8 @@ async function fixSentence(mi){
       replaceRange(s.start,s.end,d.fixed);
     }
   }catch(ex){}
-  if(btn){btn.textContent=String.fromCharCode(0x270E)+' Fix sentence';btn.disabled=false}
+  // innerHTML with a constant — our own SVG above, no user input; textContent cannot hold an icon.
+  if(btn){btn.innerHTML=FIX_ICON+'Fix sentence';btn.disabled=false}
 }
 
 apiEl.value=API;
