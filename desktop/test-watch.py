@@ -538,6 +538,25 @@ def test_popup(tmp):
        "and the span points at that same finding: %r" % (watch.first_span(ms),))
     ok(watch.alternatives([{"offset": 0, "length": 1, "replacements": []}]) == [],
        "a finding with no replacement offers no chips")
+    # A sentence with two issues: the card shows one, and says how many others there are. The
+    # engine's own sample does this, so a user fixing the named error watched the line stay
+    # underlined with nothing to explain it.
+    two = [{"offset": 0, "length": 2, "replacements": [{"value": "a"}]},
+           {"offset": 9, "length": 3, "replacements": [{"value": "b"}]}]
+    ok(watch.others(two) == 1, "a sentence with two fixable issues reports one more: %r"
+       % watch.others(two))
+    ok(watch.others([{"offset": 0, "length": 2, "replacements": [{"value": "a"}]}]) == 0,
+       "a sentence with one issue reports no others")
+    ok(watch.others([{"offset": 0, "length": 2, "replacements": []},
+                     {"offset": 9, "length": 3, "replacements": [{"value": "b"}]}]) == 0,
+       "a finding with no replacement is not counted as another issue")
+    ok(watch.others([]) == 0, "and no findings at all is zero, not negative")
+    ok(watch.shown([{"offset": 0, "length": 2, "replacements": []},
+                    {"offset": 9, "length": 3, "replacements": [{"value": "b"}]}])["offset"] == 9,
+       "shown() skips a finding that carries no replacement, rather than pointing at it")
+    ok(watch.first_span(two) == (0, 2) and watch.alternatives(two) == ["a"],
+       "and alternatives() and first_span() agree on which one that is: %r / %r"
+       % (watch.first_span(two), watch.alternatives(two)))
     ok(watch.parse_reply('{"action": "replace", "text": "the"}')
        == {"action": "replace", "text": "the"}, "the JSON reply is read")
     ok(watch.parse_reply("fix") == {"action": "sentence", "text": ""},
@@ -563,7 +582,7 @@ def test_popup(tmp):
        "the card draws plain text, so the document's own writing cannot become markup")
     # And the other half of the seam: every field the watcher puts in the payload is one the card
     # actually draws. A key renamed on one side and not the other is a silently blank line.
-    for key in ("old", "reason", "badge", "alts", "more", "api", "sentence"):
+    for key in ("old", "reason", "badge", "alts", "more", "api", "sentence", "others"):
         ok("payload.%s" % key in qml, "the card draws the '%s' the watcher sends" % key)
 
     monitors = [(0, 0, 1920, 1080)]

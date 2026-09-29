@@ -144,36 +144,60 @@ def notify_actions(summary, body, actions=(("fix", "Fix it"), ("copy", "Copy fix
         return ""
 
 
+def shown(matches):
+    """The one finding the card is showing: the first in document order that carries a replacement.
+
+    This rule had three copies — in alternatives(), in first_span() and in the count for "more
+    issues" — and two of them carried a comment warning that they must not drift, because a chip
+    that picked a different finding than the span would rewrite the text somewhere else in the
+    sentence. It lives here once now. Pure.
+    """
+    for m in sorted(matches, key=lambda m: m["offset"]):
+        if m.get("replacements"):
+            return m
+    return None
+
+
 def alternatives(matches):
-    """Every replacement the engine offered for the first finding, in its own order.
+    """Every replacement the engine offered for the finding the card is showing, in its own order.
 
     The card used to receive only replacements[0], so a spelling fix offered "Teh" and hid "the",
     "tea" and "tech" — the engine had already found them. Pure, so the ordering and the
     de-duplication are testable without a display.
     """
+    match = shown(matches)
+    if match is None:
+        return []
     out = []
-    for m in sorted(matches, key=lambda m: m["offset"]):
-        if not m.get("replacements"):
-            continue
-        for rep in m["replacements"]:
-            value = (rep.get("value") or "").strip()
-            if value and value not in out:
-                out.append(value)
-        break        # the card shows one finding at a time, so its fixes are what belongs here
+    for rep in match["replacements"]:
+        value = (rep.get("value") or "").strip()
+        if value and value not in out:
+            out.append(value)
     return out
 
 
 def first_span(matches):
     """Where the finding the card is showing sits, as (offset, length) in the checked window.
 
-    It must pick the same match alternatives() does - same sort, same skip of findings that carry
-    no replacement - or a chip would rewrite the text somewhere else in the sentence. The pair is
-    asserted together in test-watch.py for that reason.
+    It must pick the same match alternatives() does — both now call shown() — or a chip would
+    rewrite the text somewhere else in the sentence. The pair is asserted together in
+    test-watch.py for that reason.
     """
-    for m in sorted(matches, key=lambda m: m["offset"]):
-        if m.get("replacements"):
-            return int(m["offset"]), int(m["length"])
-    return 0, 0
+    match = shown(matches)
+    if match is None:
+        return 0, 0
+    return int(match["offset"]), int(match["length"])
+
+
+def others(matches):
+    """How many *other* findings with a fix the same sentence has, for the card to mention.
+
+    A sentence carrying two issues showed one and said nothing about the second, so fixing what
+    the card named left the line still underlined with no explanation — measured on this project's
+    own sample, "She go to the office.", which the engine flags twice. Pure.
+    """
+    with_fix = [m for m in matches if m.get("replacements")]
+    return max(0, len(with_fix) - (1 if shown(matches) is not None else 0))
 
 
 def parse_reply(text):
@@ -203,8 +227,8 @@ def popup_actions(issue, position):
     possible at all (no display, no Qt) — the caller then falls back to a toast.
 
     Its own process, so nothing Qt touches this daemon. The payload is one dict — old, reason,
-    badge, alts, more, api, sentence — which is also the shape a future IPC would carry, if this
-    ever grows a
+    badge, alts, more, api, sentence, others — which is also the shape a future IPC would carry,
+    if this ever grows a
     second host. It travels on stdin rather than in argv because the alternatives are a list, and
     a list on a command line is a quoting bug waiting to happen.
     """
@@ -221,6 +245,9 @@ def popup_actions(issue, position):
                "api": issue.get("api", ""), "sentence": issue.get("sentence", "")}
     if issue.get("more"):
         payload["more"] = issue["more"]
+    if issue.get("others"):
+        # Only when there is one: the card says nothing rather than "0 more issues".
+        payload["others"] = int(issue["others"])
     try:
         proc = subprocess.run(argv, input=json.dumps(payload).encode(),
                               capture_output=True, timeout=30)
@@ -355,6 +382,7 @@ class Watcher:
         self.last_notified, self.last_time = piece, time.monotonic()
         found = suggestions(piece, matches)
         old, new, reason = found[0]
+        span = first_span(matches)
         issue = {"old": old, "new": new, "reason": reason,
                  # The card offers every fix the engine returned for this finding, not just the
                  # first: the alternatives were being thrown away a line later.
@@ -367,12 +395,14 @@ class Watcher:
                  "api": getattr(self.client, "API", ""),
                  # The span a chip replaces: the finding's own words, absolute in the document.
                  # Fix sentence is the button that takes the whole line.
-                 "span": [begin + start + first_span(matches)[0],
-                          begin + start + first_span(matches)[0] + first_span(matches)[1]],
+                 "span": [begin + start + span[0], begin + start + span[0] + span[1]],
                  # The badge is the engine's real time, not a decoration: it is how the user sees
                  # whether a suggestion is instant or cost something.
                  "badge": "Rules engine · %d ms" % round(self.last_engine_ms or 0),
-                 "more": "; ".join("%s → %s" % (o, n) for o, n, _ in found[1:4])}
+                 "more": "; ".join("%s → %s" % (o, n) for o, n, _ in found[1:4]),
+                 # A second issue in the same sentence used to be invisible: the card named one
+                 # error while Fix sentence corrected both, which reads as a mystery.
+                 "others": others(matches)}
         position = self.caret_position(text, caret)
         self.busy = True
         # Off the a11y event loop: waiting for a button press must not deafen the listener.

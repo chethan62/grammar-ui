@@ -139,6 +139,19 @@ Window {
                 color: card.c("faint", "#8a93a0")
                 wrapMode: Text.WordWrap
             }
+            // The sentence often carries more than one issue, and the engine's own sample does:
+            // naming one error while "Fix sentence" silently corrected both read as a mystery.
+            Text {
+                width: parent.width
+                visible: (card.payload.others || 0) > 0
+                text: card.payload.others === 1
+                      ? "1 more issue in this sentence — Fix sentence corrects both."
+                      : (card.payload.others + " more issues in this sentence — Fix sentence "
+                         + "corrects them all.")
+                font.pixelSize: 12
+                color: card.c("muted", "#5a6472")
+                wrapMode: Text.WordWrap
+            }
 
             // ---- the engine's answers -----------------------------------------------------
             Rule { visible: card.hasAlts }

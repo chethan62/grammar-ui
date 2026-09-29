@@ -107,6 +107,13 @@ def test_payload(popup):
     many = popup.parse_payload('{"alts": [%s]}' % ", ".join('"a%d"' % i for i in range(12)))
     ok(len(many["alts"]) == popup.MAX_CHIPS,
        "twelve alternatives are capped to a card, not a menu: %d" % len(many["alts"]))
+    # The whitelist in parse_payload is half the payload seam, and the half the QML test cannot
+    # see: "others" was added to the watcher and the card, and silently dropped here in between.
+    ok(popup.parse_payload('{"others": 2}')["others"] == 2,
+       "a count the watcher sends survives the whitelist")
+    ok(popup.parse_payload('{"others": "junk"}')["others"] == 0,
+       "and junk in it is zero, which draws nothing rather than raising")
+    ok(popup.parse_payload("{}")["others"] == 0, "a card with no count at all is zero")
     # The GTK card shipped Pango markup and had to escape the document's text by hand; the QML
     # card renders plain text, so that escaping is gone by construction. What is left to check is
     # the palette it is rendered in: complete in both schemes, and legible in both.

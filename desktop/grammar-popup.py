@@ -93,6 +93,13 @@ def parse_payload(raw, argv=None):
         value = data.get(key, "")
         return value.strip() if isinstance(value, str) else ""
 
+    def as_count(key):
+        """A number the card acts on (only "others" today). Junk is 0, which draws nothing."""
+        try:
+            return max(0, int(data.get(key) or 0))
+        except (TypeError, ValueError):
+            return 0
+
     alts = []
     for value in data.get("alts") or []:
         if isinstance(value, str) and value.strip() and value.strip() not in alts:
@@ -104,7 +111,11 @@ def parse_payload(raw, argv=None):
         data["new"] = alts[0]
     return {"old": as_text("old"), "new": as_text("new"), "reason": as_text("reason"),
             "badge": as_text("badge"), "more": as_text("more"), "alts": alts[:MAX_CHIPS],
-            "api": as_text("api").rstrip("/"), "sentence": as_text("sentence")}
+            "api": as_text("api").rstrip("/"), "sentence": as_text("sentence"),
+            # Every field the watcher sends has to be named here or it never reaches the card:
+            # this whitelist is exactly where "others" was dropped, and the QML seam test cannot
+            # see that half of the seam.
+            "others": as_count("others")}
 
 
 def clamp(x, y, w, h, monitors):
