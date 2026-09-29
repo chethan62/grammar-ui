@@ -36,8 +36,17 @@ jobs:
         run: |
           set -e
           sudo apt-get update -qq
-          sudo apt-get install -y python3-pyside6.qml
+          # The libraries the import needs. Not optional: pip's PySide6 wheels do not ship libEGL,
+          # so without these the import fails with "libEGL.so.1: cannot open shared object file".
           sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libdbus-1-3 libfontconfig1
+          # Which Qt packaging this runner offers is discovered, not assumed: a guessed name
+          # ("python3-pyside6.qml") was not on the runner at all, and that single failed apt line
+          # was behind three red runs, because the failure only showed up two steps later.
+          PKGS=$(apt-cache search --names-only '^python3-pyside6' | cut -d' ' -f1 | tr '\n' ' ')
+          echo "pyside6 packages offered here: ${PKGS:-none}"
+          if [ -n "$PKGS" ]; then sudo apt-get install -y $PKGS; fi
+          python3 -c "import PySide6" 2>/dev/null \
+            || pip install --quiet --break-system-packages PySide6
           python3 -c "import PySide6; print('Qt importable:', PySide6.__version__)"
       - name: caret pop-up placement
         run: python3 desktop/test-popup-place.py
