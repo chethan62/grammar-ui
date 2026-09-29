@@ -156,23 +156,35 @@ def test_live():
         ok((px, py) == (x, y),
            "placed exactly where the caret asked: asked %d,%d got %d,%d" % (x, y, px, py))
 
-        # Second witness: the X server's own view of the same window.
-        ids = subprocess.run([xdotool, "search", "--name", "^grammar$"],
+        # Second witness: the X server's own view of the same window, searched by the pop-up's
+        # own pid rather than by its title. Measured: with a second grammar card on screen (a
+        # manual 120s one at 700,300) the title search found *that* window and this gate reported
+        # "the window is at 700,300" against its own card's 2369,545. The watcher may well have a
+        # card up while make test runs, so the gate must identify its own and nothing else.
+        ids = subprocess.run([xdotool, "search", "--pid", str(proc.pid)],
                              capture_output=True, text=True).stdout.split()
-        ok(bool(ids), "the card has an X window (%d found)" % len(ids))
-        if ids:
-            geo = subprocess.run([xdotool, "getwindowgeometry", ids[0]],
+        ok(bool(ids), "the card has an X window (%d found, own pid %d)" % (len(ids), proc.pid))
+        # GTK gives the card more than one X window (measured: 2 for a single pop-up) and
+        # xdotool's order is not guaranteed, so ask whether *any* of this pid's windows sits at
+        # the asked spot. Reading ids[0] passed on this box by luck of ordering.
+        positions = []
+        for wid in ids:
+            geo = subprocess.run([xdotool, "getwindowgeometry", wid],
                                  capture_output=True, text=True).stdout
             g = re.search(r"Position: (\d+),(\d+)", geo)
-            ok(bool(g) and (int(g.group(1)), int(g.group(2))) == (x, y),
-               "xdotool agrees the window is at %d,%d (%r)" % (x, y, geo.strip().replace("\n", " ")))
+            if g:
+                positions.append((int(g.group(1)), int(g.group(2))))
+        ok((x, y) in positions,
+           "xdotool agrees one of the card's %d windows is at %d,%d: %r"
+           % (len(ids), x, y, positions))
     finally:
         proc.terminate()
         try:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             proc.kill()
-        subprocess.run([xdotool, "search", "--name", "^grammar$"], capture_output=True)
+        # No cleanup search here: searching by title would have closed nothing anyway (xdotool
+        # search does not dismiss a window), and while a card was up it picked the wrong one.
 
 
 def main():
