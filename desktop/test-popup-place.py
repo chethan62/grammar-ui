@@ -154,8 +154,12 @@ def test_live():
 def main():
     try:
         popup = load_popup()
-    except Exception as exc:                       # no gi, no GTK: the clamp tests still matter
-        print("  clamp: skipped (cannot import the pop-up: %s)" % exc)
+    # SystemExit included deliberately: with gi present but no Gtk typelib - exactly what a CI
+    # runner looks like - the pop-up's own import guard prints "no pop-up: Namespace Gtk not
+    # available" and exits 2. That is SystemExit, which `except Exception` does not catch, and
+    # the gate died with exit 2 inside CI while passing on a desktop with GTK.
+    except (Exception, SystemExit) as exc:
+        print("  clamp: skipped (the pop-up cannot run here: %s)" % exc)
         popup = None
     if popup is not None:
         test_clamp(popup)
