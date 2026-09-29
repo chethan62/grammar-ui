@@ -17,6 +17,7 @@ serve:
 
 test:
 	node --check app.js
+	node test/contrast.test.js
 	node test/esc.test.js
 	python3 desktop/test-lookup.py
 	python3 desktop/test-watch.py

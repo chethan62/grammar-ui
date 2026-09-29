@@ -156,7 +156,7 @@ function render(text,matches){
         html+='<button class="rep" data-mi="'+i+'" data-ri="'+j+'">'+esc(m.replacements[j].value)+'</button>';
       html+='</div>';
     }
-    html+='<button class="rep" data-fix="'+i+'" style="margin-top:.35rem;background:var(--accent);border-color:var(--accent);color:#fff">'+FIX_ICON+'Fix sentence</button>';
+    html+='<button class="rep fix" data-fix="'+i+'">'+FIX_ICON+'Fix sentence</button>';
     html+='</div>';
   }
   resEl.innerHTML=html;

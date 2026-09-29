@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>grammar-ui</title>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark">
+<title>Grammar — offline checker</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div class="app">
 <header>
-  <h1><span class="dot"></span>Grammar<span style="color:var(--muted);font-weight:400;font-size:.82rem"> &middot; offline</span></h1>
+  <h1><span class="dot"></span>Grammar<span class="tag">&middot; offline</span></h1>
   <div class="apibox">
     <label for="api">API</label>
     <input id="api" spellcheck="false" placeholder="http://localhost:8875">
@@ -25,9 +25,9 @@
 </details>
 <main>
 <div class="pane">
-  <div class="pane-head">Input <span class="stats" id="inputStats">0 ch &middot; 0 w</span></div>
+  <label class="pane-head" for="text">Input <span class="stats" id="inputStats">0 ch &middot; 0 w</span></label>
   <div class="pane-body">
-    <textarea id="text" placeholder="Write or paste text… live checking as you type" autofocus>She go to the office. teh quick brown fox</textarea>
+    <textarea id="text" aria-label="Text to check" spellcheck="false" placeholder="Write or paste text… live checking as you type" autofocus>She go to the office. teh quick brown fox</textarea>
     <div class="toolbar">
       <select id="lang" title="Dialect"><option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="en-CA">English (CA)</option><option value="en-AU">English (AU)</option><option value="en-IN">English (IN)</option></select>
       <button class="primary" id="fixAllBtn" onclick="applyAll()" title="Ctrl+Enter">Fix all</button>
@@ -49,7 +49,7 @@
   </div>
 </div>
 <div class="pane">
-  <div class="pane-head">Issues <span class="stats" id="issueStats"></span></div>
+  <div class="pane-head">Issues <span class="stats" id="issueStats" aria-live="polite"></span></div>
   <div class="pane-body" id="results"><p class="empty">Checking…</p></div>
 </div>
 </main>

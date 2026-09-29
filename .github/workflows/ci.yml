@@ -27,6 +27,14 @@ jobs:
       # itself and says so; the sentence logic and the notification contract still run.
       - name: typing watcher
         run: python3 desktop/test-watch.py
+      - name: contrast gate
+        # Reads the tokens out of style.css, so a palette edit is checked rather than trusted.
+        run: node test/contrast.test.js
+      - name: GTK typelib for the pop-up gate
+        # Without this the runner has gi but no Gtk typelib, so the pop-up's own import guard
+        # exits 2 and the gate can only report "0 assertions - passed". With it, the clamp()
+        # assertions genuinely run in CI.
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq gir1.2-gtk-3.0
       - name: caret pop-up placement
         # The clamp() assertions run anywhere; the live leg needs a display and xdotool and
         # says so when it skips rather than passing quietly.
