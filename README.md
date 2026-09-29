@@ -15,9 +15,10 @@ python3 -m http.server 8899      # or any static server, or just open index.html
 
 (8899 is free on this box; 8888 is held by `passt`.)
 
-Then point it at your server: the **API** field in the header defaults to
-`http://localhost:8875` and is remembered in `localStorage`. Cross-origin
-requests work because grammar-server sends `Access-Control-Allow-Origin: *`.
+Then point it at your server: the **API** field in the header defaults to the host that
+served the page, port 8875 (`http://localhost:8875` on this machine, and the machine's own
+address when you opened the page from a phone), and is remembered in `localStorage`.
+Cross-origin requests work because grammar-server sends `Access-Control-Allow-Origin: *`.
 
 `Test` asks the server for its version, so you can tell "wrong URL" from
 "server down".
@@ -30,8 +31,10 @@ systemctl --user enable --now grammar-ui
 ```
 
 Copies the three files to `~/.local/share/grammar-ui` and installs a user unit that
-serves them on `127.0.0.1:8899` (python's stdlib server; no dependency to keep
-patched, no build step). The unit carries a soft `Wants=grammar-server.service`, so
+serves them on `0.0.0.0:8899` (python's stdlib server; no dependency to keep
+patched, no build step). It binds the LAN so a phone can open the UI; the engine is
+opened to the LAN to match, and grammar-server's README says what that costs. `--bind
+127.0.0.1` in the unit and `make install` puts it back to loopback-only. The unit carries a soft `Wants=grammar-server.service`, so
 the pair comes up together at login. `make uninstall` reverses it, `make serve` runs
 it in the foreground for development, `make test` runs the CI gate.
 
