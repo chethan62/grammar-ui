@@ -474,6 +474,44 @@ def test_popup(tmp):
         else:
             os.environ["REC"] = saved_rec
 
+    # The two answers the card can give that carry their own text, and the one that must not.
+    # offer() has to route them by hand: a chip replaces the finding's own span, a rephrase chip
+    # replaces the sentence, and plain "sentence" means the correction the watcher computed.
+    class FakeWatcher(watch.Watcher):
+        def __init__(self, answer):
+            self.busy = False
+            self.answer = answer
+            self.applied = None
+
+        def ask(self, issue, position=None):
+            return self.answer
+
+        def unchanged(self, *args):
+            return True
+
+        def replace(self, start, end, text):
+            self.applied = (start, end, text)
+
+    fw = FakeWatcher({"action": "replace", "text": "the"})
+    fw.offer(100, 140, "piece", "Fixed.", {"span": [108, 111]})
+    ok(fw.applied == (108, 111, "the"),
+       "a chip replaces the finding's own span, not the sentence: %r" % (fw.applied,))
+    ok(fw.busy is False, "and the watcher is free again afterwards")
+
+    fw = FakeWatcher({"action": "sentence", "text": "A rephrased line."})
+    fw.offer(100, 140, "piece", "Fixed.", {"span": [108, 111]})
+    ok(fw.applied == (100, 140, "A rephrased line."),
+       "a rephrase chip carries its own text and replaces the sentence: %r" % (fw.applied,))
+
+    fw = FakeWatcher({"action": "sentence"})
+    fw.offer(100, 140, "piece", "Fixed.", {"span": [108, 111]})
+    ok(fw.applied == (100, 140, "Fixed."),
+       "plain Fix sentence still means the correction the watcher computed: %r" % (fw.applied,))
+
+    fw = FakeWatcher({"action": ""})
+    fw.offer(100, 140, "piece", "Fixed.", {"span": [108, 111]})
+    ok(fw.applied is None, "and Ignore applies nothing at all")
+
     # and the fallback ordering: with no position, the toast path answers
     stub_ns = os.path.join(tmp, "notify-send")
     with open(stub_ns, "w") as fh:

@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""The suggestion card: what is wrong, every fix the engine offered, and one click to take one.
+"""The suggestion card: what is wrong, every fix the engine offered, and a rephrase on request.
 
 Its own process on purpose. The watcher asks it the way it asks notify-send — payload in, one
 JSON line out — so no GTK state lands in the daemon and a card that dies cannot take the watcher
@@ -13,7 +13,15 @@ The card, top to bottom:
   when the engine had also suggested "the", "tea" and "tech";
 * Fix sentence, which applies every non-overlapping correction in the line at once (the watcher
   computes that text, not this process);
-* Copy, for when the destination is not the document; and Ignore, which is a real answer.
+* Copy, for when the destination is not the document; and Ignore, which is a real answer;
+* a tone and an intent, and Rephrase.
+
+**This process makes the rephrase call itself.** It is a local process on loopback and it owns
+the interaction, so the few seconds a small model needs are spent here rather than inside the
+watcher's ask path, where they would hold every other application's suggestions while the user
+waited. The call runs on a thread and comes back through GLib.idle_add, because GTK is not
+thread-safe and a frozen card is worse than no card. No browser is involved in this path: when
+the chips come back they are answered with the same one-line contract as any other button.
 
 It follows the desktop's theme instead of hardcoding one, and it never takes focus
 (accept_focus False plus a POPUP_MENU window), so typing in the application continues while it
@@ -30,20 +38,25 @@ Input, one of two ways:
 
 * a JSON object on stdin (what the watcher sends):
       {"old": "teh", "reason": "...", "badge": "Rules engine · 12 ms",
-       "alts": ["Teh", "the", "tea", "tech"], "word": "teh", "more": "..."}
+       "alts": ["Teh", "the", "tea", "tech"], "more": "...",
+       "api": "http://127.0.0.1:8875", "sentence": "She go to the office."}
 * the old argv flags, for a shell: --old --new --reason --badge --more
 
 Either way: --x/--y <px> position it at the caret, --timeout <s> is how long it stays up (12).
 
-Prints one JSON line when a button is pressed — {"action": "replace", "text": "the"},
-{"action": "sentence"}, {"action": "copy"} — and nothing if it was dismissed or expired. Exits 2
-when no pop-up is possible at all (no display, no GTK) so the caller can fall back to a
-notification. On stderr: PLACED <x> <y> (asked <x> <y>), so a test can tell placement from luck.
+Prints one JSON line when an action is taken — {"action": "replace", "text": "the"},
+{"action": "sentence"}, {"action": "sentence", "text": "<a rephrased line>"}, {"action": "copy"}
+— and nothing if it was dismissed or expired. Exits 2 when no pop-up is possible at all (no
+display, no GTK) so the caller can fall back to a notification. On stderr: PLACED <x> <y>
+(asked <x> <y>), so a test can tell placement from luck.
 """
 
 import json
 import os
 import sys
+import threading
+import urllib.error
+import urllib.request
 from xml.sax.saxutils import escape
 
 os.environ.setdefault("GDK_BACKEND", "x11")  # before Gtk: positioning needs the X11 backend
@@ -57,6 +70,10 @@ except Exception as exc:  # noqa: BLE001 - any failure here means "use a notific
     sys.exit(2)
 
 MAX_CHIPS = 6          # a card, not a menu: the engine's first few are the useful ones
+MAX_CANDIDATES = 3     # the model's alternatives, shown in place of the fixes
+REPHRASE_TIMEOUT = 90  # a cold local model on this CPU has taken 6s; the server caps it anyway
+TONES = ("", "professional", "casual", "formal")
+INTENTS = ("", "concise", "clear", "simple")
 
 
 def parse_payload(raw, argv=None):
@@ -97,7 +114,57 @@ def parse_payload(raw, argv=None):
     if alts and not as_text("new"):
         data["new"] = alts[0]
     return {"old": as_text("old"), "new": as_text("new"), "reason": as_text("reason"),
-            "badge": as_text("badge"), "more": as_text("more"), "alts": alts[:MAX_CHIPS]}
+            "badge": as_text("badge"), "more": as_text("more"), "alts": alts[:MAX_CHIPS],
+            "api": as_text("api").rstrip("/"), "sentence": as_text("sentence")}
+
+
+def rephrase_body(sentence, tone="", intent=""):
+    """The body for POST /v2/rewrite. Pure: the card's own contract with its server."""
+    body = {"text": sentence, "language": "en-US"}
+    if tone:
+        body["tone"] = tone
+    if intent:
+        body["intent"] = intent
+    return body
+
+
+def candidates_from(response):
+    """The alternatives out of a rewrite response. Pure, and tolerant: that JSON is another
+    process's. An error response carries no candidates, only a message worth showing."""
+    if not isinstance(response, dict) or response.get("message"):
+        return []
+    out = []
+    for value in response.get("candidates") or []:
+        if isinstance(value, str) and value.strip() and value.strip() not in out:
+            out.append(value.strip())
+    return out[:MAX_CANDIDATES]
+
+
+def api_error_message(response, status=0):
+    """Why a call failed, in the server's own words when it has them. Pure."""
+    if isinstance(response, dict) and response.get("message"):
+        return str(response["message"])
+    if status:
+        return "the rewrite backend answered HTTP %d" % status
+    return "the backend did not answer"
+
+
+def post_json(url, body, timeout=REPHRASE_TIMEOUT):
+    """POST, and read the JSON back either way: an error body is the instruction to show."""
+    request = urllib.request.Request(
+        url, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"},
+        method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.status, json.loads(response.read().decode() or "{}")
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode(errors="replace")
+        try:
+            return exc.code, json.loads(raw)
+        except ValueError:
+            return exc.code, {}
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        return 0, {"message": "cannot reach the engine at %s (%s)" % (url, exc)}
 
 
 def card_markup(old, new, reason="", badge="", more="", chips=False):
@@ -231,6 +298,80 @@ def main():
         button.connect("clicked", pick(action, ""))
         row.pack_end(button, False, False, 0)
     box.pack_start(row, False, False, 0)
+
+    status = Gtk.Label()
+    status.set_xalign(0)
+    status.set_line_wrap(True)
+    status.set_max_width_chars(38)
+    status.set_selectable(False)
+
+    # The model lives here now, not in a browser. Rephrase needs an engine URL and the sentence it
+    # is rephrasing; without both, the row is not offered rather than offered and broken.
+    if payload["api"] and payload["sentence"]:
+        airow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        tone = Gtk.ComboBoxText()
+        for value in TONES:
+            tone.append(value, "tone: " + (value or "as-is"))
+        tone.set_active(0)
+        intent = Gtk.ComboBoxText()
+        for value in INTENTS:
+            intent.append(value, value or "rephrase as-is")
+        intent.set_active(0)
+        rephrase = Gtk.Button(label="Rephrase")
+
+        def render_candidates(candidates, message):
+            """Back on the main loop: swap the fixes for the model's alternatives."""
+            status.set_markup("")
+            rephrase.set_sensitive(True)
+            if message:
+                status.set_markup('<span size="small">%s</span>' % escape(message))
+                return False
+            for child in box.get_children():
+                if isinstance(child, Gtk.FlowBox) and getattr(child, "grammar_ai", False):
+                    box.remove(child)
+            ai = Gtk.FlowBox()
+            ai.grammar_ai = True
+            ai.set_selection_mode(Gtk.SelectionMode.NONE)
+            ai.set_max_children_per_line(1)
+            ai.set_row_spacing(6)
+            for candidate in candidates:
+                chip = Gtk.Button(label=candidate)
+                chip.set_relief(Gtk.ReliefStyle.NONE)
+                # A rephrase replaces the whole sentence, so the answer is a sentence action
+                # carrying its own text — the watcher applies answer["text"] when it is there.
+                chip.connect("clicked", pick("sentence", candidate))
+                ai.add(chip)
+            box.pack_start(ai, False, False, 0)
+            box.reorder_child(ai, 1)
+            win.show_all()
+            return False
+
+        def worker(sentence, tone_value, intent_value, url):
+            """Off the main loop: the call, then back on it. GLib is not thread-safe, and this is
+            the only way a local model's few seconds do not freeze the card."""
+            status_code, response = post_json(url + "/v2/rewrite",
+                                              rephrase_body(sentence, tone_value, intent_value))
+            candidates = candidates_from(response)
+            if candidates:
+                GLib.idle_add(render_candidates, candidates, "")
+            else:
+                GLib.idle_add(render_candidates, [], api_error_message(response, status_code))
+
+        def on_rephrase(*_):
+            rephrase.set_sensitive(False)
+            status.set_markup('<span size="small">Rephrasing… a local model takes a few '
+                              'seconds</span>')
+            threading.Thread(target=worker, daemon=True,
+                             args=(payload["sentence"], tone.get_active_id() or "",
+                                   intent.get_active_id() or "", payload["api"])).start()
+
+        rephrase.connect("clicked", on_rephrase)
+        airow.pack_start(tone, False, False, 0)
+        airow.pack_start(intent, False, False, 0)
+        airow.pack_end(rephrase, False, False, 0)
+        box.pack_start(airow, False, False, 0)
+        box.pack_start(status, False, False, 0)
+
     win.add(box)
     win.show_all()
 

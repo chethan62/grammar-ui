@@ -211,8 +211,13 @@ def popup_actions(issue, position):
     if position is None or not os.path.exists(script):
         return None
     argv = [sys.executable, script, "--x", str(position[0]), "--y", str(position[1])]
+    # The card makes the rephrase call itself, so it needs the engine's address and the sentence.
+    # Both arrive in the issue: the address from the client's own API constant (one source of the
+    # default, not two), and an empty one simply means the card offers no rephrase row instead of
+    # a button that fails on every click.
     payload = {"old": issue.get("old", ""), "reason": issue.get("reason", ""),
-               "badge": issue.get("badge", ""), "alts": issue.get("alts") or []}
+               "badge": issue.get("badge", ""), "alts": issue.get("alts") or [],
+               "api": issue.get("api", ""), "sentence": issue.get("sentence", "")}
     if issue.get("more"):
         payload["more"] = issue["more"]
     try:
@@ -353,6 +358,12 @@ class Watcher:
                  # The card offers every fix the engine returned for this finding, not just the
                  # first: the alternatives were being thrown away a line later.
                  "alts": alternatives(matches),
+                 # The card rephrases the *corrected* line: sending the user's own errors to a
+                 # small model invites it to preserve or pad them.
+                 "sentence": fixed,
+                 # Where the card should send a rephrase. From the client, which owns the
+                 # GRAMMAR_API default; empty when it cannot be read, and the card copes.
+                 "api": getattr(self.client, "API", ""),
                  # The span a chip replaces: the finding's own words, absolute in the document.
                  # Fix sentence is the button that takes the whole line.
                  "span": [begin + start + first_span(matches)[0],
@@ -404,7 +415,9 @@ class Watcher:
                 span = issue.get("span") or [start, end]
                 self.replace(span[0], span[1], answer.get("text") or issue.get("new") or "")
             elif action == "sentence":
-                self.replace(start, end, fixed)
+                # A chip from the card's own Rephrase carries its text; Fix sentence does not and
+                # means the correction the watcher already computed.
+                self.replace(start, end, answer.get("text") or fixed)
             else:
                 self.client.copy(fixed)
         finally:

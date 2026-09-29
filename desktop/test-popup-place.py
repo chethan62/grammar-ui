@@ -114,6 +114,22 @@ def test_payload(popup):
     ok(popup.action_json("copy") == '{"action": "copy"}',
        "a copy answer carries no text: %r" % popup.action_json("copy"))
 
+    # The rephrase the card now makes itself: the request it builds, and how it reads the answer.
+    ok(popup.rephrase_body("Fine.", "professional", "concise")
+       == {"text": "Fine.", "language": "en-US", "tone": "professional", "intent": "concise"},
+       "the rephrase body carries the sentence, the tone and the intent")
+    ok(popup.rephrase_body("Fine.") == {"text": "Fine.", "language": "en-US"},
+       "and leaves tone and intent out when none is chosen: %r" % popup.rephrase_body("Fine."))
+    ok(popup.candidates_from({"candidates": ["A.", "B.", "A.", "  "], "model": "m"}) == ["A.", "B."],
+       "the model's alternatives come back de-duplicated and trimmed: %r"
+       % popup.candidates_from({"candidates": ["A.", "B.", "A.", "  "]}))
+    ok(popup.candidates_from({"message": "rewrite backend unavailable"}) == [],
+       "an error response carries no candidates, only a message")
+    ok("unavailable" in popup.api_error_message({"message": "rewrite backend unavailable"}, 503),
+       "and what is shown is the server's own words")
+    ok("HTTP 503" in popup.api_error_message({}, 503),
+       "with the status as the fallback: %r" % popup.api_error_message({}, 503))
+
 
 def test_live():
     """The card in a real process, placed for real, reporting from the X server."""
