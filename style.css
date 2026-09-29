@@ -64,5 +64,7 @@ mark.t-typography{background:color-mix(in srgb,var(--style) 55%,#000);color:#fff
 .aifields input{background:var(--card);border:1px solid var(--border);border-radius:6px;padding:.35rem .55rem;color:var(--fg);font:inherit;font-size:.78rem;min-width:11rem}
 .aifields input:focus{outline:1px solid var(--accent)}
 .ainote{font-size:.74rem;color:var(--muted);line-height:1.5}
+.ainote.aitest:empty{display:none}
+.ainote.aitest b{color:var(--fg)}
 .check{display:flex;align-items:center;gap:.3rem;font-size:.78rem;color:var(--muted);cursor:pointer;padding:.35rem .5rem;border:1px solid var(--border);border-radius:6px}
 .check input{cursor:pointer}

@@ -319,7 +319,8 @@ saveApi();
 // says writable:false the panel explains rather than offering dead buttons.
 var aiPanelEl=document.getElementById('aiPanel'),aiBodyEl=document.getElementById('aiBody'),
     aiDotEl=document.getElementById('aiDot'),aiSummaryEl=document.getElementById('aiSummary'),
-    ai=null; // the last GET /v1/ai
+    ai=null,        // the last GET /v1/ai
+    aiTest=null;    // the last backend test, as HTML — see aiTestShow()
 
 function aiDot(state){
   aiDotEl.className='aidot'+(state==='ok'?' on':(state==='bad'?' bad':''));
@@ -356,8 +357,21 @@ function renderAI(st){
      '<label for="aimodel">Model</label><input id="aimodel" spellcheck="false" list="aimodels" value="'+esc(st.model||'')+'"'+(st.writable?'':' disabled')+'>'+
      '<datalist id="aimodels">';
   for(i=0;i<st.models.length;i++)h+='<option value="'+esc(st.models[i])+'">';
-  h+='</datalist><button class="primary" id="aiApply" onclick="applyAI()"'+(st.writable?'':' disabled')+'>Apply</button></div>';
+  h+='</datalist><button class="primary" id="aiApply" onclick="applyAI()"'+(st.writable?'':' disabled')+'>Apply</button>';
+  if(st.provider&&st.provider!=='none'){
+    // Available over the LAN too: it changes nothing, it only spends a second of
+    // CPU proving the backend can actually answer.
+    h+='<button class="ghost" id="aiTest" onclick="testAI()">Test this backend</button>';
+  }
+  h+='</div>';
 
+  // Rephrase with no backend is a 503 explained in the Issues pane, which is a
+  // worse way to learn it than a disabled button that says why up front.
+  var ready=!!(st.provider&&st.provider!=='none');
+  var rb=document.getElementById('rephraseBtn');
+  if(rb){rb.disabled=!ready;rb.title=ready?'':'No AI backend — pick one in the AI backend row above'}
+
+  h+='<div class="ainote aitest" id="aitest">'+(aiTest||'')+'</div>';
   h+='<div class="ainote" id="aimsg">';
   if(!st.writable){
     h+='Read-only from this device: the server accepts settings only from the machine it runs on.';
@@ -410,6 +424,45 @@ async function applyAI(){
     if(msg)msg.innerHTML='<b>'+esc(e.message)+'</b>';
   }
   if(btn){btn.disabled=false;btn.textContent='Apply'}
+}
+
+// Does the chosen backend really rephrase? /v1/models answering proves the port
+// is open, not that a model is loaded or that it will follow the instruction --
+// an LM Studio with no model loaded lists models and cannot rewrite a word. One
+// short sentence through the real endpoint is the only honest answer, and the
+// milliseconds tell you whether it was warm.
+var AI_TEST_TEXT='This sentence is not very clear and it could be made much better.';
+
+// renderAI() replaces the whole panel body, so a result written only into the
+// DOM disappears the next time the panel loads (opening it refreshes it). Every
+// outcome goes through here: kept in aiTest for the next render, and painted if
+// the element is on screen.
+function aiTestShow(html){
+  aiTest=html;
+  var out=document.getElementById('aitest');
+  if(out)out.innerHTML=html;
+}
+
+async function testAI(){
+  var btn=document.getElementById('aiTest');
+  if(btn){btn.disabled=true;btn.textContent='Testing…'}
+  try{
+    var r=await fetch(api('/v2/rewrite'),{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({text:AI_TEST_TEXT,language:langEl.value})});
+    var raw=await r.text(),d=null;
+    try{d=JSON.parse(raw)}catch(ignore){}
+    if(!r.ok||!d||!d.candidates||!d.candidates.length){
+      // The server's own message names the fix (start it, pull the model, set the
+      // key), so it is shown verbatim rather than replaced with "failed".
+      aiTestShow('<b>'+esc((d&&d.error)||raw.slice(0,240)||('HTTP '+r.status))+'</b>');
+    }else{
+      aiTestShow('Answers: <b>'+esc(d.provider||'?')+' / '+esc(d.model)+'</b> in '+d.elapsedMs+
+        ' ms — <b>'+esc(d.candidates[0])+'</b>'+(d.elapsedMs>8000?' (that was a cold model load)':''));
+    }
+  }catch(e){
+    aiTestShow('<b>'+esc(e.message)+'</b>');
+  }
+  if(btn){btn.disabled=false;btn.textContent='Test this backend'}
 }
 
 aiBodyEl.addEventListener('click',function(e){

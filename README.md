@@ -143,6 +143,10 @@ than a rebuild. Open **AI backend** at the top of the page:
   and the catch-all say the sentence leaves it. An API key is read from the environment
   variable the preset names (`OPENROUTER_API_KEY`, `OPENAI_API_KEY`) — never typed here,
   never stored, and the panel only reports whether it is set.
+- **Test.** One short sentence through the real endpoint, because `/v1/models` answering
+  proves the port is open, not that a model is loaded and will follow the instruction —
+  an LM Studio with nothing loaded lists models and cannot rewrite a word. The
+  milliseconds it reports tell you whether the model was warm.
 - **Read-only over the LAN.** The server accepts settings only from the machine it runs
   on, so from your phone the panel explains that instead of offering buttons that would
   fail. Checks still work from anywhere: it is settings that are local-only.
