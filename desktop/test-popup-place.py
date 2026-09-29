@@ -213,6 +213,38 @@ def test_settings(popup):
     ok(lan["writable"] is False and any("Read-only" in w for w in lan["warnings"]),
        "a request from another machine renders read-only: %r" % lan["warnings"])
 
+    # The key, which a custom OpenAI-compatible endpoint needs. The panel never shows the value —
+    # the server reports only whether it has one — so what matters here is that the panel says
+    # which state it is in, and never claims the key is missing when one is set.
+    with_key = popup.settings_view({"provider": "openai", "url": "http://x/v1", "model": "m",
+                                    "keyEnv": "OPENAI_API_KEY", "keySet": True, "writable": True})
+    ok(with_key["needsKey"] and with_key["keySet"], "a key-needing runner reports that it has one")
+    ok("saved" in with_key["keyNote"] and not with_key["warnings"],
+       "so the key note says saved and nothing warns about a missing key: %r / %r"
+       % (with_key["keyNote"], with_key["warnings"]))
+    without = popup.settings_view({"provider": "openai", "keyEnv": "OPENAI_API_KEY",
+                                   "keySet": False, "writable": True})
+    ok(not without["keySet"] and any("OPENAI_API_KEY" in w and "below" in w
+                                     for w in without["warnings"]),
+       "no key yet points at the field that fixes it: %r" % without["warnings"])
+    local = popup.settings_view({"provider": "ollama", "reachable": True, "writable": True})
+    ok(not local["needsKey"], "a local runner does not ask for a key at all")
+
+    # A custom OpenAI-compatible server often has no /v1/models, so an empty model list is not the
+    # same fault as nothing answering. Calling it "not answering" would send someone hunting for a
+    # server that is running perfectly well.
+    custom = popup.settings_view({"provider": "openai", "url": "http://127.0.0.1:8099",
+                                  "model": "m", "reachable": False, "writable": True})
+    ok(custom["tone"] == "warn" and "not answering" not in custom["status"]
+       and "normal for a custom endpoint" in custom["status"],
+       "a custom endpoint with no model list is unverified, not dead: %r" % custom["status"])
+    others = [popup.settings_view(s)["tone"] for s in (
+        {"provider": "ollama", "reachable": True, "writable": True},
+        {"provider": "lmstudio", "reachable": False, "writable": True},
+        {"provider": "none", "writable": True})]
+    ok(others == ["good", "bad", "idle"],
+       "and the pill's tone distinguishes working, not answering and off: %r" % others)
+
     empty = popup.settings_view({})
     ok(empty["presets"][-1]["id"] == "none" and empty["status"] == "" and empty["models"] == [],
        "an empty state still yields a usable panel: %r" % empty)
@@ -221,7 +253,8 @@ def test_settings(popup):
     # The seam, same rule as the payload: every key the view produces is one the panel draws.
     with open(os.path.join(HERE, "grammar-card.qml")) as fh:
         qml = fh.read()
-    for key in ("presets", "models", "provider", "url", "hint", "warnings", "status"):
+    for key in ("presets", "models", "provider", "url", "hint", "warnings", "status",
+                "tone", "keySet", "needsKey", "keyNote"):
         ok('s("%s"' % key in qml, "the panel draws the '%s' the view produces" % key)
     ok("card.s(\"model\"" in qml and "writable" in qml,
        "and the model field and the read-only flag reach the panel")

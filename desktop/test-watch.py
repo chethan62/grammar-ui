@@ -11,6 +11,7 @@ CI and `make test` can just call python3.
 
 import importlib.util
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -580,6 +581,14 @@ def test_popup(tmp):
         qml = fh.read()
     ok("RichText" not in qml,
        "the card draws plain text, so the document's own writing cannot become markup")
+    # A literal fractional pixelSize fails the *whole* card to load ("int expected"), while the
+    # same value inside a ternary is coerced at runtime — so this trap has now been walked into
+    # twice. The QML run-time error only appears in the card's stderr, which is why it is checked
+    # here instead.
+    bad_size = re.search(r"pixelSize:\s*\d+\.\d+", qml)
+    ok(bad_size is None,
+       "no fractional font.pixelSize literal (it fails the load): %r"
+       % (bad_size.group(0) if bad_size else ""))
     # And the other half of the seam: every field the watcher puts in the payload is one the card
     # actually draws. A key renamed on one side and not the other is a silently blank line.
     for key in ("old", "reason", "badge", "alts", "more", "api", "sentence", "others"):

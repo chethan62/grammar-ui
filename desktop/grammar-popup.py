@@ -251,27 +251,45 @@ def settings_view(state):
     if state.get("model") and str(state["model"]) not in models:
         models.insert(0, str(state["model"]))     # the configured one is always pickable
 
+    key_env = str(state.get("keyEnv") or "")
+    key_set = bool(state.get("keySet"))
+
     warnings = []
     if state.get("writable") is False:
         warnings.append("Read-only here: the backend can only be changed on the machine the "
                         "server runs on.")
     if provider and provider != "none" and state.get("local") is False:
         warnings.append("Cloud backend: the sentence you rephrase leaves this machine.")
-    if state.get("keyEnv") and not state.get("keySet"):
-        warnings.append("No %s in the server's environment — rewriting will answer 503 until it "
-                        "is set and the server restarted." % state["keyEnv"])
+    if key_env and not key_set:
+        # Names the fix, not just the fault: the panel below is where the key goes.
+        warnings.append("No %s in the server's environment and none saved yet — rewriting will "
+                        "answer 503 until you add one below." % key_env)
 
     if state.get("reachable"):
         status = "answering — %d model%s, ready to choose" % (len(models), "" if len(models) == 1 else "s")
-    elif provider and provider != "none":
-        status = "not answering at %s" % (state.get("url") or "")
+        tone = "good"
+    elif not provider or provider == "none":
+        status, tone = "", "idle"
+    elif provider == "openai":
+        # The "any other OpenAI-compatible server" case: many such servers expose no /v1/models,
+        # so an empty list is not the same fault as nothing answering. Saying "not answering" here
+        # would call a perfectly good endpoint dead and send someone hunting.
+        status = ("no model list at %s — normal for a custom endpoint. Name the model and Save; "
+                  "Test checks it again." % (state.get("url") or "the address"))
+        tone = "warn"
     else:
-        status = ""
+        status = "not answering at %s" % (state.get("url") or "the address")
+        tone = "bad"
     return {"provider": provider, "url": str(state.get("url") or ""),
             "model": str(state.get("model") or ""), "presets": presets, "models": models,
             "hint": str(state.get("hint") or ""), "warnings": warnings,
             "reachable": bool(state.get("reachable")),
-            "writable": state.get("writable") is not False, "status": status}
+            "writable": state.get("writable") is not False, "status": status, "tone": tone,
+            "keyEnv": key_env, "keySet": key_set, "needsKey": bool(key_env),
+            # What the key field says under it. The value itself is never sent anywhere: the
+            # server accepts one and reports only whether it has one.
+            "keyNote": ("a key is saved (%s in the environment overrides it)" % key_env) if key_set
+                       else ("a key is needed" if key_env else "not needed for this runner")}
 
 
 # ---- the host -----------------------------------------------------------------------------------
@@ -344,15 +362,21 @@ class Bridge(QObject):
         else:
             self.window.setProperty("status", api_error_message(state, code))
 
-    @Slot(str, str, str)
-    def saveSettings(self, provider, url, model):
+    @Slot(str, str, str, str)
+    def saveSettings(self, provider, url, model, key):
         # A save failure must be visible, so the panel says it is working before the round trip.
         self.window.setProperty("status", "Saving…")
-        threading.Thread(target=self._save_settings, args=(provider, url, model), daemon=True).start()
+        threading.Thread(target=self._save_settings, args=(provider, url, model, key),
+                         daemon=True).start()
 
-    def _save_settings(self, provider, url, model):
-        code, state = post_json(self.api_base + "/v1/ai",
-                                {"provider": provider, "url": url, "model": model})
+    def _save_settings(self, provider, url, model, key):
+        body = {"provider": provider, "url": url, "model": model}
+        # Only when one was typed. An empty field means "leave the stored key alone" — the only
+        # safe reading for a password box that never displays what is saved, and the server treats
+        # an empty apiKey the same way.
+        if key:
+            body["apiKey"] = key
+        code, state = post_json(self.api_base + "/v1/ai", body)
         if code == 200:
             self.window.setProperty("settings", settings_view(state))
             self.window.setProperty("status", "Saved — this backend outlives a restart.")

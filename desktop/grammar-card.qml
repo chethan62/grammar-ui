@@ -57,6 +57,14 @@ Window {
         return settings && settings[name] !== undefined ? settings[name] : fallback
     }
 
+    // Save, and the same thing Enter does in any of the fields: one place, so the four controls
+    // cannot drift apart, and the key is handed over and then cleared out of the widget.
+    function saveRunner() {
+        card.status = ""
+        bridge.saveSettings(runnerBox.currentValue, urlField.text, modelBox.editText, keyField.text)
+        keyField.text = ""
+    }
+
     // The whole card's entrance: short enough that it feels like it was already there.
     OpacityAnimator on opacity { from: 0; to: 1; duration: 120 }
     Component.onCompleted: visible = true
@@ -239,15 +247,50 @@ Window {
             id: settingsPanel
             x: 14
             y: 14
-            spacing: 9
+            spacing: 10
             width: 408
             visible: card.view === "settings"
 
-            Text {
-                text: "AI runner"
-                font.pixelSize: 17
-                font.weight: Font.DemiBold
-                color: card.c("text", "#14181d")
+            // ---- header: what this is, and how it is doing ----------------------------------
+            RowLayout {
+                width: parent.width
+                spacing: 8
+                Text {
+                    Layout.fillWidth: true
+                    text: "AI runner"
+                    font.pixelSize: 17
+                    font.weight: Font.DemiBold
+                    color: card.c("text", "#14181d")
+                }
+                // A dot and one word, so the state reads at a glance instead of being buried in a
+                // sentence. The sentence is still there, under the buttons.
+                Row {
+                    spacing: 6
+                    Rectangle {
+                        width: 7
+                        height: 7
+                        radius: 3.5
+                        anchors.verticalCenter: parent.verticalCenter
+                        color: {
+                            var t = card.s("tone", "idle")
+                            if (t === "good") return "#2f9e57"
+                            if (t === "warn") return "#d9822b"
+                            if (t === "bad") return "#cf4b3f"
+                            return card.c("faint", "#8a93a0")
+                        }
+                    }
+                    Text {
+                        text: {
+                            var t = card.s("tone", "idle")
+                            if (t === "good") return "working"
+                            if (t === "warn") return "unverified"
+                            if (t === "bad") return "not answering"
+                            return "off"
+                        }
+                        font.pixelSize: 12
+                        color: card.c("muted", "#5a6472")
+                    }
+                }
             }
             Text {
                 width: parent.width
@@ -258,51 +301,90 @@ Window {
                 wrapMode: Text.WordWrap
             }
 
-            Caption { text: "RUNNER" }
-            ComboBox {
-                id: runnerBox
-                width: parent.width
-                model: card.s("presets", [])
-                textRole: "label"
-                valueRole: "id"
-                // Follows what is configured, and re-follows it when a save returns a new state.
-                currentIndex: {
-                    var ps = card.s("presets", [])
-                    var want = card.s("provider", "")
-                    for (var i = 0; i < ps.length; i++) {
-                        if (ps[i].id === want) return i
+            Rule {}
+
+            Field {
+                label: "RUNNER"
+                note: {
+                    var p = card.s("presets", [])[runnerBox.currentIndex] || ({})
+                    return p.local === false ? "Cloud: what you rephrase leaves this machine."
+                                             : "Local: nothing leaves this machine."
+                }
+                ComboBox {
+                    id: runnerBox
+                    width: parent.width
+                    model: card.s("presets", [])
+                    textRole: "label"
+                    valueRole: "id"
+                    // Follows what is configured, and re-follows it when a save returns a new state.
+                    currentIndex: {
+                        var ps = card.s("presets", [])
+                        var want = card.s("provider", "")
+                        for (var i = 0; i < ps.length; i++) {
+                            if (ps[i].id === want) return i
+                        }
+                        return -1
                     }
-                    return -1
-                }
-                onActivated: {
-                    // Picking a product fills in its defaults, because nobody remembers that LM
-                    // Studio listens on 1234. Both fields stay editable for anything unlisted.
-                    var p = card.s("presets", [])[currentIndex] || ({})
-                    urlField.text = p.url || ""
-                    modelBox.editText = p.model || ""
+                    onActivated: {
+                        // Picking a product fills in its defaults, because nobody remembers that
+                        // LM Studio listens on 1234. Both fields stay editable for anything
+                        // unlisted, and typing an address does not wipe a model already chosen.
+                        var p = card.s("presets", [])[currentIndex] || ({})
+                        urlField.text = p.url || ""
+                        if (p.model) modelBox.editText = p.model
+                    }
                 }
             }
 
-            Caption { text: "WHERE IT ANSWERS" }
-            TextField {
-                id: urlField
-                width: parent.width
-                text: card.s("url", "")
-                placeholderText: "http://127.0.0.1:11434"
-                enabled: card.editable
+            Field {
+                label: "ADDRESS"
+                note: "The base URL of the server, no /v1 needed at the end."
+                TextField {
+                    id: urlField
+                    width: parent.width
+                    text: card.s("url", "")
+                    placeholderText: "http://127.0.0.1:11434"
+                    enabled: card.editable
+                    onAccepted: card.saveRunner()
+                }
             }
 
-            Caption { text: "MODEL" }
-            ComboBox {
-                id: modelBox
-                width: parent.width
+            Field {
+                label: "MODEL"
                 // Editable *and* listed: a local server reports what it has loaded, so the list is
                 // the real choice, and a name it does not know can still be typed.
-                editable: true
-                enabled: card.editable
-                model: card.s("models", [])
-                editText: card.s("model", "")
+                note: "What this server reports, or type any model name."
+                ComboBox {
+                    id: modelBox
+                    width: parent.width
+                    editable: true
+                    enabled: card.editable
+                    model: card.s("models", [])
+                    editText: card.s("model", "")
+                }
             }
+
+            Field {
+                // Only for runners that need one: showing an empty password box under a local
+                // server would suggest something is missing when nothing is.
+                visible: card.s("needsKey", false)
+                label: "API KEY"
+                note: card.s("keyNote", "") + " — stored 0600 on the machine the engine runs on, "
+                      + "never sent back, and only settable from that machine."
+                TextField {
+                    id: keyField
+                    width: parent.width
+                    enabled: card.editable
+                    echoMode: TextInput.Password
+                    // Never the stored value: the server reports whether it has one and nothing
+                    // more, so an empty box means "leave it alone" and the note above says which.
+                    placeholderText: card.s("keySet", false)
+                                     ? "a key is saved — type here to replace it"
+                                     : "paste the key"
+                    onAccepted: card.saveRunner()
+                }
+            }
+
             Text {
                 width: parent.width
                 visible: text.length > 0
@@ -312,9 +394,9 @@ Window {
                 wrapMode: Text.WordWrap
             }
 
-            // The honest bits: a cloud backend, a key that is not in the server's environment, or a
-            // request from another machine that may not change anything. Each one is the server's
-            // own finding, passed through rather than invented here.
+            // The honest bits: a cloud backend, a key not set yet, or a request from another
+            // machine that may not change anything. Each one is the server's own finding, passed
+            // through rather than invented here.
             Repeater {
                 model: card.s("warnings", [])
                 delegate: Row {
@@ -338,6 +420,8 @@ Window {
                 }
             }
 
+            Rule {}
+
             RowLayout {
                 width: parent.width
                 spacing: 6
@@ -348,6 +432,7 @@ Window {
                     color: card.c("muted", "#5a6472")
                     wrapMode: Text.WordWrap
                 }
+                Act { text: "Close"; onClicked: bridge.choose("", "") }
                 Act {
                     text: "Test"
                     // The same round trip as Save: /v1/ai asks the backend for its model list, so
@@ -361,12 +446,8 @@ Window {
                     text: "Save"
                     primary: true
                     enabled: card.editable
-                    onClicked: {
-                        card.status = ""
-                        bridge.saveSettings(runnerBox.currentValue, urlField.text, modelBox.editText)
-                    }
+                    onClicked: card.saveRunner()
                 }
-                Act { text: "Close"; onClicked: bridge.choose("", "") }
             }
         }
     }
@@ -383,6 +464,28 @@ Window {
         font.weight: Font.DemiBold
         font.letterSpacing: 0.8
         color: card.c("faint", "#8a93a0")
+    }
+
+    // A labelled row: caption, the control, and a note that says what it wants or what the state
+    // is. One definition, so four fields cannot end up aligned differently — which is most of what
+    // "looks professional" means in a settings panel.
+    component Field: Column {
+        id: field
+        property string label: ""
+        property string note: ""
+        default property alias content: slot.data
+        width: settingsPanel.width
+        spacing: 4
+        Caption { text: field.label }
+        Column { id: slot; width: field.width; spacing: 4 }
+        Text {
+            width: field.width
+            visible: field.note.length > 0
+            text: field.note
+            font.pixelSize: 11
+            color: card.c("faint", "#8a93a0")
+            wrapMode: Text.WordWrap
+        }
     }
 
     // Controls.Basic's Button styled from scratch — this is the part GTK would not give up.
