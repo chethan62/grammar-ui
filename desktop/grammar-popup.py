@@ -177,10 +177,11 @@ def card_markup(old, new, reason="", badge="", more="", chips=False):
     """
     parts = []
     if chips:
-        # The alternatives are the buttons now, so the headline is just the offender. Repeating
-        # the first one as "old → new" would show the same fix twice.
+        # The alternatives are the buttons now, so the headline is just the offender — repeating
+        # the first one as "old → new" would show the same fix twice. Large and bold because it is
+        # the problem the card exists for, and as plain grey it was the faintest thing on it.
         if old:
-            parts.append("<s>%s</s>" % escape(old))
+            parts.append('<span size="large" weight="bold"><s>%s</s></span>' % escape(old))
     elif old and new:
         parts.append("<s>%s</s>  →  <b>%s</b>" % (escape(old), escape(new)))
     elif new:
@@ -256,7 +257,7 @@ def main():
     win.connect("destroy", lambda *_: Gtk.main_quit())
 
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-    box.set_border_width(12)
+    box.set_border_width(14)
     chips = len(payload["alts"]) > 1
     text = Gtk.Label()
     text.set_markup(card_markup(payload["old"], payload["new"], payload["reason"],
@@ -273,19 +274,41 @@ def main():
             Gtk.main_quit()
         return handler
 
+    def section(label):
+        """A faint section label over a hairline rule.
+
+        The first version was one flat column, so nothing said where the fixes ended and the
+        actions began — the parts were all there and the card still read as a wall.
+        """
+        box.pack_start(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL), False, False, 2)
+        cap = Gtk.Label()
+        cap.set_markup('<span size="small" weight="bold" alpha="55%%">%s</span>' % escape(label))
+        cap.set_xalign(0)
+        box.pack_start(cap, False, False, 0)
+
     if chips:
-        # One chip per replacement, wrapping: this is the feature the old card lacked.
+        # One chip per replacement, wrapping. The engine returns them best-first, so the first
+        # wears the primary style: which fix is being offered should be visible, not inferred.
+        section("FIXES")
         flow = Gtk.FlowBox()
         flow.set_selection_mode(Gtk.SelectionMode.NONE)
         flow.set_max_children_per_line(4)
         flow.set_min_children_per_line(1)
         flow.set_row_spacing(6)
         flow.set_column_spacing(6)
-        for alt in payload["alts"]:
+        for i, alt in enumerate(payload["alts"]):
             chip = Gtk.Button(label=alt)
+            if i == 0:
+                chip.get_style_context().add_class("suggested-action")
             chip.connect("clicked", pick("replace", alt))
             flow.add(chip)
         box.pack_start(flow, False, False, 0)
+
+    status = Gtk.Label()
+    status.set_xalign(0)
+    status.set_line_wrap(True)
+    status.set_max_width_chars(38)
+    status.set_selectable(False)
 
     row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
     for action, label, primary in (("sentence", "Fix sentence", True),
@@ -299,50 +322,48 @@ def main():
         row.pack_end(button, False, False, 0)
     box.pack_start(row, False, False, 0)
 
-    status = Gtk.Label()
-    status.set_xalign(0)
-    status.set_line_wrap(True)
-    status.set_max_width_chars(38)
-    status.set_selectable(False)
+    # The model's lines land here, directly under their own heading, so the card says what they
+    # are instead of showing three unexplained sentences.
+    ai_slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
 
     # The model lives here now, not in a browser. Rephrase needs an engine URL and the sentence it
-    # is rephrasing; without both, the row is not offered rather than offered and broken.
+    # is rephrasing; without both the section is not offered at all, rather than offered broken.
     if payload["api"] and payload["sentence"]:
+        section("REPHRASE")
+        box.pack_start(ai_slot, False, False, 0)
         airow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         tone = Gtk.ComboBoxText()
         for value in TONES:
             tone.append(value, "tone: " + (value or "as-is"))
         tone.set_active(0)
+        tone.set_size_request(124, -1)     # the combos used to be the widest thing on the card
         intent = Gtk.ComboBoxText()
         for value in INTENTS:
             intent.append(value, value or "rephrase as-is")
         intent.set_active(0)
+        intent.set_size_request(146, -1)
         rephrase = Gtk.Button(label="Rephrase")
 
         def render_candidates(candidates, message):
-            """Back on the main loop: swap the fixes for the model's alternatives."""
+            """Back on the main loop: the alternatives appear under their own heading, as flat
+            rows. A bordered button on every line would shout as loudly as the fixes, and a fix
+            is the more likely answer — but flat rows still need the heading, or three
+            unexplained sentences appear in the middle of the card."""
             status.set_markup("")
             rephrase.set_sensitive(True)
+            for child in ai_slot.get_children():
+                ai_slot.remove(child)
             if message:
                 status.set_markup('<span size="small">%s</span>' % escape(message))
                 return False
-            for child in box.get_children():
-                if isinstance(child, Gtk.FlowBox) and getattr(child, "grammar_ai", False):
-                    box.remove(child)
-            ai = Gtk.FlowBox()
-            ai.grammar_ai = True
-            ai.set_selection_mode(Gtk.SelectionMode.NONE)
-            ai.set_max_children_per_line(1)
-            ai.set_row_spacing(6)
             for candidate in candidates:
                 chip = Gtk.Button(label=candidate)
                 chip.set_relief(Gtk.ReliefStyle.NONE)
+                chip.set_halign(Gtk.Align.START)
                 # A rephrase replaces the whole sentence, so the answer is a sentence action
                 # carrying its own text — the watcher applies answer["text"] when it is there.
                 chip.connect("clicked", pick("sentence", candidate))
-                ai.add(chip)
-            box.pack_start(ai, False, False, 0)
-            box.reorder_child(ai, 1)
+                ai_slot.pack_start(chip, False, False, 0)
             win.show_all()
             return False
 

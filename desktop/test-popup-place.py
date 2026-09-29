@@ -107,8 +107,9 @@ def test_payload(popup):
     many = popup.parse_payload('{"alts": [%s]}' % ", ".join('"a%d"' % i for i in range(12)))
     ok(len(many["alts"]) == popup.MAX_CHIPS,
        "twelve alternatives are capped to a card, not a menu: %d" % len(many["alts"]))
-    ok(popup.card_markup("teh", "the", chips=True) == "<s>teh</s>",
-       "with chips the headline is the offender alone, so the first fix is not printed twice")
+    headline = popup.card_markup("teh", "the", chips=True)
+    ok("<s>teh</s>" in headline and "weight=\"bold\"" in headline and "the" not in headline,
+       "with chips the headline is the offender alone and carries the weight: %r" % headline)
     ok(popup.action_json("replace", "the") == '{"action": "replace", "text": "the"}',
        "and the answer is one JSON line: %r" % popup.action_json("replace", "the"))
     ok(popup.action_json("copy") == '{"action": "copy"}',
