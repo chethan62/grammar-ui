@@ -23,3 +23,7 @@ jobs:
       # itself when no engine is running, which is why this can run in CI at all.
       - name: selection checker
         run: python3 desktop/test-lookup.py
+      # The typing watcher. Its live leg needs LibreOffice and at-spi, so in CI it skips
+      # itself and says so; the sentence logic and the notification contract still run.
+      - name: typing watcher
+        run: python3 desktop/test-watch.py

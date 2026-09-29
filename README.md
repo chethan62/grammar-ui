@@ -60,6 +60,39 @@ running, so the last Ctrl+V is yours — it does paste automatically if either b
 available. And it checks on demand, not while you type; that would need an input method
 (fcitx5/ibus), which is a different project.
 
+## Suggest as you type (no browser, any application)
+
+`grammar-watch` reads what you type through the accessibility bus — the interface a screen
+reader uses — so there is no browser extension and nothing to click. When you pause, the
+sentence around the caret is checked and a notification appears:
+
+```
+She go → She goes
+[Fix it] [Copy fix]
+```
+
+**Fix it** replaces the text inside the application, through its own text interface, so the
+app records the edit the way it records typing. **Copy fix** puts the corrected sentence on
+your clipboard instead. A finding is mentioned once, not on every keystroke.
+
+```bash
+make install
+systemctl --user enable --now grammar-watch
+journalctl --user -fu grammar-watch      # what it is doing (GRAMMAR_WATCH_DEBUG=1 for more)
+```
+
+Every sentence is checked as it is written: the window is the sentence the caret is in, found
+with one bounded read per pause rather than re-reading the whole document, so an error typed
+two sentences ago was caught when you typed it. What it cannot serve is an application that
+publishes no accessible text at all — most terminals, and Electron apps started without
+`--force-renderer-accessibility`. Nothing short of an input method can, because the
+accessibility bus is the only door into another application's text.
+
+Verified against LibreOffice Writer: the document is reachable, its caret is readable, and
+the correction lands in the document. `desktop/test-watch.py` proves it by starting its own
+LibreOffice in a throwaway profile — it can never touch a document you are working on — which
+is also why that test takes about forty seconds.
+
 ## Install (Linux, current user)
 
 ```bash

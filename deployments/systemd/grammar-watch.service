@@ -1,0 +1,20 @@
+[Unit]
+Description=grammar-watch (suggest fixes as you type, in any application)
+# There is no DOM outside a browser: this reads the accessibility bus, so it belongs to a
+# graphical session, not to a network or a service account.
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+# /usr/bin/python3 explicitly, not /usr/bin/env: the at-spi bindings (gi.repository.Atspi)
+# live in the system python, and a PATH that resolves to a virtualenv would import-fail its
+# way into a restart loop. (grammar-lookup is stdlib-only and does not care.)
+ExecStart=/usr/bin/python3 %h/.local/bin/grammar-watch
+Restart=on-failure
+RestartSec=5
+# It talks to the session bus and reads the window contents. Nothing here needs privilege.
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target
