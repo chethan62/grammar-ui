@@ -1,4 +1,4 @@
-// The suggestion card.
+// The suggestion card, and the AI-runner settings panel it can turn into.
 //
 // QML rather than GTK3: the GTK card was ~90% Breeze's defaults, so every attempt to design it
 // came back looking like a Breeze dialog. Here the surface, the chips, the spacing and the
@@ -8,6 +8,12 @@
 // Text is plain, and that is left alone on purpose. The strings arrive from the user's own writing
 // via the engine, and the GTK card had to escape them by hand for Pango. Here the injection
 // cannot happen at all.
+//
+// Two views, one surface. "finding" is the card at the caret; "settings" is the same card as the
+// AI-runner panel (`grammar-popup.py --settings`), which is where the browser UI's settings went
+// when the browser UI was removed. The panel decides nothing: it draws what GET /v1/ai returns and
+// calls POST /v1/ai, which validates, applies and saves, so the choice outlives a restart. Which
+// preset is right for a box, and whether a key is present, are the server's findings, not ours.
 //
 // The process contract is unchanged: the host reads a JSON payload on stdin, prints one JSON line
 // on stdout, and exits 2 when no card is possible. Nothing here touches the network except through
@@ -30,16 +36,26 @@ Window {
     width: surface.width
     height: surface.height
 
-    property var payload: ({})      // what the watcher sent
-    property var colors: ({})       // from the desktop's palette, via the host
-    property var candidates: []     // the model's alternatives, filled by the host
+    property var payload: ({})       // what the watcher sent
+    property var colors: ({})        // from the desktop's palette, via the host
+    property var candidates: []      // the model's alternatives, filled by the host
+    property var settings: ({})      // GET /v1/ai, through the host
+    property string view: "finding"  // "finding" | "settings"
     property string status: ""
     property bool busy: false
+
     readonly property bool hasAlts: payload.alts !== undefined && payload.alts.length > 1
     readonly property bool canRephrase: payload.api !== undefined && payload.api.length > 0
                                         && payload.sentence !== undefined && payload.sentence.length > 0
+    // A request from another machine may not change the backend: the server refuses it, so the
+    // panel is read-only rather than offer a button that fails.
+    readonly property bool editable: settings.writable !== false
 
     function c(name, fallback) { return colors && colors[name] ? colors[name] : fallback }
+    // The settings state is another process's JSON: every read needs a fallback.
+    function s(name, fallback) {
+        return settings && settings[name] !== undefined ? settings[name] : fallback
+    }
 
     // The whole card's entrance: short enough that it feels like it was already there.
     OpacityAnimator on opacity { from: 0; to: 1; duration: 120 }
@@ -53,8 +69,12 @@ Window {
         color: card.c("surface", "#ffffff")
         border.width: 1
         border.color: card.c("border", "#e2e5ea")
-        implicitWidth: content.implicitWidth + 28
-        implicitHeight: content.implicitHeight + 28
+        // One decided width for both views, and a height taken from whichever is showing. Decided
+        // rather than derived: sizing a column from children that wrap to the parent's width is a
+        // binding cycle, and it clipped the rephrase row off the right edge (measured).
+        implicitWidth: 436
+        implicitHeight: (card.view === "settings" ? settingsPanel.implicitHeight
+                                                  : findingPanel.implicitHeight) + 28
         layer.enabled: true
         layer.effect: MultiEffect {
             shadowEnabled: true
@@ -63,16 +83,14 @@ Window {
             shadowColor: "#40000000"
         }
 
+        // ==================== the finding ====================
         Column {
-            id: content
+            id: findingPanel
             x: 14
             y: 14
             spacing: 10
-            // A decided width, not a width derived from children that wrap to the parent's width:
-            // that is a binding cycle, and it clipped the right edge of every wide row (measured —
-            // the rephrase combos were cut off). Text wraps inside this; the card no longer has to
-            // shrink to its longest line.
             width: 408
+            visible: card.view !== "settings"
 
             // ---- what is wrong ------------------------------------------------------------
             RowLayout {
@@ -91,6 +109,18 @@ Window {
                     text: card.payload.badge || ""
                     font.pixelSize: 11
                     color: card.c("faint", "#8a93a0")
+                }
+                // The way in to the settings. The card is where the checking happens, so it is
+                // where the backend is chosen; after the browser UI was removed there is no other
+                // surface at all.
+                Act {
+                    flat: true
+                    text: "AI runner"
+                    onClicked: {
+                        card.view = "settings"
+                        card.status = ""
+                        bridge.loadSettings()
+                    }
                 }
             }
             Text {
@@ -188,6 +218,142 @@ Window {
                 font.pixelSize: 12
                 color: card.c("muted", "#5a6472")
                 wrapMode: Text.WordWrap
+            }
+        }
+
+        // ==================== the AI runner ====================
+        Column {
+            id: settingsPanel
+            x: 14
+            y: 14
+            spacing: 9
+            width: 408
+            visible: card.view === "settings"
+
+            Text {
+                text: "AI runner"
+                font.pixelSize: 17
+                font.weight: Font.DemiBold
+                color: card.c("text", "#14181d")
+            }
+            Text {
+                width: parent.width
+                text: "Which model rephrases your sentences. Checking your writing works either "
+                      + "way — this affects Rephrase only, and the choice survives a restart."
+                font.pixelSize: 12
+                color: card.c("muted", "#5a6472")
+                wrapMode: Text.WordWrap
+            }
+
+            Caption { text: "RUNNER" }
+            ComboBox {
+                id: runnerBox
+                width: parent.width
+                model: card.s("presets", [])
+                textRole: "label"
+                valueRole: "id"
+                // Follows what is configured, and re-follows it when a save returns a new state.
+                currentIndex: {
+                    var ps = card.s("presets", [])
+                    var want = card.s("provider", "")
+                    for (var i = 0; i < ps.length; i++) {
+                        if (ps[i].id === want) return i
+                    }
+                    return -1
+                }
+                onActivated: {
+                    // Picking a product fills in its defaults, because nobody remembers that LM
+                    // Studio listens on 1234. Both fields stay editable for anything unlisted.
+                    var p = card.s("presets", [])[currentIndex] || ({})
+                    urlField.text = p.url || ""
+                    modelBox.editText = p.model || ""
+                }
+            }
+
+            Caption { text: "WHERE IT ANSWERS" }
+            TextField {
+                id: urlField
+                width: parent.width
+                text: card.s("url", "")
+                placeholderText: "http://127.0.0.1:11434"
+                enabled: card.editable
+            }
+
+            Caption { text: "MODEL" }
+            ComboBox {
+                id: modelBox
+                width: parent.width
+                // Editable *and* listed: a local server reports what it has loaded, so the list is
+                // the real choice, and a name it does not know can still be typed.
+                editable: true
+                enabled: card.editable
+                model: card.s("models", [])
+                editText: card.s("model", "")
+            }
+            Text {
+                width: parent.width
+                visible: text.length > 0
+                text: card.s("hint", "")
+                font.pixelSize: 11
+                color: card.c("faint", "#8a93a0")
+                wrapMode: Text.WordWrap
+            }
+
+            // The honest bits: a cloud backend, a key that is not in the server's environment, or a
+            // request from another machine that may not change anything. Each one is the server's
+            // own finding, passed through rather than invented here.
+            Repeater {
+                model: card.s("warnings", [])
+                delegate: Row {
+                    required property string modelData
+                    width: settingsPanel.width
+                    spacing: 7
+                    Rectangle {
+                        width: 6
+                        height: 6
+                        radius: 3
+                        color: "#d9822b"
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                    Text {
+                        width: settingsPanel.width - 13
+                        text: modelData
+                        font.pixelSize: 12
+                        color: card.c("muted", "#5a6472")
+                        wrapMode: Text.WordWrap
+                    }
+                }
+            }
+
+            RowLayout {
+                width: parent.width
+                spacing: 6
+                Text {
+                    Layout.fillWidth: true
+                    text: card.status.length > 0 ? card.status : card.s("status", "")
+                    font.pixelSize: 12
+                    color: card.c("muted", "#5a6472")
+                    wrapMode: Text.WordWrap
+                }
+                Act {
+                    text: "Test"
+                    // The same round trip as Save: /v1/ai asks the backend for its model list, so
+                    // one call answers both "is it up" and "what may I pick".
+                    onClicked: {
+                        card.status = ""
+                        bridge.loadSettings()
+                    }
+                }
+                Act {
+                    text: "Save"
+                    primary: true
+                    enabled: card.editable
+                    onClicked: {
+                        card.status = ""
+                        bridge.saveSettings(runnerBox.currentValue, urlField.text, modelBox.editText)
+                    }
+                }
+                Act { text: "Close"; onClicked: bridge.choose("", "") }
             }
         }
     }

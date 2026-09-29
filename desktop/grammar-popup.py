@@ -58,6 +58,9 @@ MAX_CANDIDATES = 3     # the model's alternatives, shown as rows in the rephrase
 REPHRASE_TIMEOUT = 90  # a cold local model on this CPU has taken 6s; the server caps it anyway
 TONES = ("", "professional", "casual", "formal")
 INTENTS = ("", "concise", "clear", "simple")
+# Only --settings needs this: a finding card is told where the engine is by the watcher's payload.
+# It mirrors the client's own GRAMMAR_API default, which is where that value is really owned.
+DEFAULT_API = os.environ.get("GRAMMAR_API") or "http://127.0.0.1:8875"
 
 
 # ---- the pure core: the toolkit does not own any of this ---------------------------------------
@@ -195,6 +198,71 @@ def card_colors(dark):
             "accent": "#1c2127", "accentInk": "#ffffff", "accentHover": "#2c333b"}
 
 
+def get_json(url, timeout=REPHRASE_TIMEOUT):
+    """GET, with the same tolerance as post_json: the body is another process's."""
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            return response.status, json.loads(response.read().decode() or "{}")
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode(errors="replace")
+        try:
+            return exc.code, json.loads(raw)
+        except ValueError:
+            return exc.code, {}
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        return 0, {"message": "cannot reach the engine at %s (%s)" % (url, exc)}
+
+
+def settings_view(state):
+    """What the AI-runner settings panel shows, from the server's GET /v1/ai answer. Pure.
+
+    The server already knows all of it: the presets, which one is configured, whether it answers,
+    which models it has, whether a key is present, and whether this machine may change any of it.
+    This turns that into exactly what the panel draws, so the panel holds no opinions of its own
+    and the same JSON could feed any other surface.
+    """
+    if not isinstance(state, dict):
+        state = {}
+    presets = []
+    for p in state.get("presets") or []:
+        if isinstance(p, dict) and p.get("id"):
+            presets.append({"id": str(p["id"]), "label": str(p.get("label") or p["id"]),
+                            "url": str(p.get("url") or ""), "model": str(p.get("model") or ""),
+                            "hint": str(p.get("hint") or ""), "local": bool(p.get("local")),
+                            "keyEnv": str(p.get("keyEnv") or "")})
+    # Off is a real choice and belongs last: it is not a preset (there is nothing to configure),
+    # but it is how you stop every rephrase without touching a config file.
+    presets.append({"id": "none", "label": "Off — no rewriting", "url": "", "model": "",
+                    "hint": "Replacing text never calls a model.", "local": True, "keyEnv": ""})
+
+    provider = str(state.get("provider") or "")
+    models = [str(m) for m in (state.get("models") or []) if str(m).strip()]
+    if state.get("model") and str(state["model"]) not in models:
+        models.insert(0, str(state["model"]))     # the configured one is always pickable
+
+    warnings = []
+    if state.get("writable") is False:
+        warnings.append("Read-only here: the backend can only be changed on the machine the "
+                        "server runs on.")
+    if provider and provider != "none" and state.get("local") is False:
+        warnings.append("Cloud backend: the sentence you rephrase leaves this machine.")
+    if state.get("keyEnv") and not state.get("keySet"):
+        warnings.append("No %s in the server's environment — rewriting will answer 503 until it "
+                        "is set and the server restarted." % state["keyEnv"])
+
+    if state.get("reachable"):
+        status = "answering — %d model%s, ready to choose" % (len(models), "" if len(models) == 1 else "s")
+    elif provider and provider != "none":
+        status = "not answering at %s" % (state.get("url") or "")
+    else:
+        status = ""
+    return {"provider": provider, "url": str(state.get("url") or ""),
+            "model": str(state.get("model") or ""), "presets": presets, "models": models,
+            "hint": str(state.get("hint") or ""), "warnings": warnings,
+            "reachable": bool(state.get("reachable")),
+            "writable": state.get("writable") is not False, "status": status}
+
+
 # ---- the host -----------------------------------------------------------------------------------
 
 try:
@@ -212,11 +280,12 @@ QML = os.path.join(HERE, "grammar-card.qml")
 class Bridge(QObject):
     """What the QML may call: answer, or ask the model. The network stays on this side."""
 
-    def __init__(self, window, payload, app):
+    def __init__(self, window, payload, app, api_base):
         super().__init__()
         self.window = window
         self.payload = payload
         self.app = app
+        self.api_base = api_base.rstrip("/")
         self.chosen = {"action": "", "text": ""}
 
     @Slot(str, str)
@@ -243,14 +312,58 @@ class Bridge(QObject):
             self.window.setProperty("status", api_error_message(response, code))
         self.window.setProperty("busy", False)
 
+    # ---- the AI runner: the server owns the setting, this panel is its face --------------------
+    #
+    # Nothing here decides anything. GET /v1/ai already knows the presets, which one is
+    # configured, whether it answers, what models it has, and whether this machine may change it;
+    # POST /v1/ai validates, applies and saves to ~/.config/grammar-server/ai.json so the choice
+    # outlives a restart. Asking for the model list is the same round trip as "is it up", so Test
+    # and Save are the only two verbs the panel needs.
+
+    @Slot()
+    def loadSettings(self):
+        self.window.setProperty("status", "Asking the engine…")
+        threading.Thread(target=self._load_settings, daemon=True).start()
+
+    def _load_settings(self):
+        code, state = get_json(self.api_base + "/v1/ai")
+        if code == 200:
+            self.window.setProperty("settings", settings_view(state))
+            self.window.setProperty("status", "")
+        else:
+            self.window.setProperty("status", api_error_message(state, code))
+
+    @Slot(str, str, str)
+    def saveSettings(self, provider, url, model):
+        # A save failure must be visible, so the panel says it is working before the round trip.
+        self.window.setProperty("status", "Saving…")
+        threading.Thread(target=self._save_settings, args=(provider, url, model), daemon=True).start()
+
+    def _save_settings(self, provider, url, model):
+        code, state = post_json(self.api_base + "/v1/ai",
+                                {"provider": provider, "url": url, "model": model})
+        if code == 200:
+            self.window.setProperty("settings", settings_view(state))
+            self.window.setProperty("status", "Saved — this backend outlives a restart.")
+        else:
+            # The server's own words, verbatim: it distinguishes an unknown provider, a missing
+            # model name, an unreachable server and a LAN client that may not write at all.
+            self.window.setProperty("status", api_error_message(state, code))
+
 
 def main():
     args = sys.argv[1:]
-    opts = {"x": None, "y": None, "timeout": 12}
+    opts = {"x": None, "y": None, "timeout": 0, "api": ""}
     for i, a in enumerate(args):
         key = a.lstrip("-")
         if key in opts and i + 1 < len(args):
             opts[key] = args[i + 1]
+    # --settings opens the card as the AI-runner panel: no finding, no payload, no auto-dismiss
+    # (a settings panel that vanished after 12 seconds would be a joke), and nothing on stdout when
+    # it closes, because a settings panel is not an edit to anything.
+    settings_mode = "--settings" in args
+    if not settings_mode and not opts["timeout"]:
+        opts["timeout"] = 12
     timeout = int(opts["timeout"])
 
     raw = ""
@@ -267,20 +380,30 @@ def main():
     colors = card_colors(app.palette().color(QPalette.ColorRole.Window).lightness() < 128)
 
     engine = QQmlApplicationEngine()
+    # Collect the QML errors before loading: Qt normally prints them through its own logger, but a
+    # card with a bad property line failed to load here with *nothing* on stderr, and finding out
+    # why took a separate probe. A load failure that cannot say why is a bug in the host.
+    qml_errors = []
+    engine.warnings.connect(lambda errs: qml_errors.extend(errs))
     engine.load(QUrl.fromLocalFile(QML))
     roots = engine.rootObjects()
     if not roots:
-        # Qt has already printed the QML error. Say it in the watcher's terms, and fall back.
         print("no pop-up: the card failed to load", file=sys.stderr)
+        for err in qml_errors:
+            print("  %s" % err.toString(), file=sys.stderr)
         return 2
     window = roots[0]
+    api_base = payload["api"] or opts["api"] or DEFAULT_API
     window.setProperty("payload", payload)
     window.setProperty("colors", colors)
+    window.setProperty("view", "settings" if settings_mode else "finding")
 
-    bridge = Bridge(window, payload, app)
+    bridge = Bridge(window, payload, app, api_base)
     engine.rootContext().setContextProperty("bridge", bridge)
+    if settings_mode:
+        bridge.loadSettings()          # the panel asks for its own state; nothing is passed in
 
-    if opts["x"] is not None and opts["y"] is not None:
+    if opts["x"] is not None and opts["y"] is not None or settings_mode:
         def place():
             """Position once the layout has settled, from the platform's own screen list.
 
@@ -290,16 +413,30 @@ def main():
             """
             monitors = [(s.geometry().x(), s.geometry().y(),
                          s.geometry().width(), s.geometry().height()) for s in app.screens()]
-            x, y = clamp(int(opts["x"]), int(opts["y"]), window.width(), window.height(), monitors)
+            if opts["x"] is not None and opts["y"] is not None:
+                asked = "%s %s" % (opts["x"], opts["y"])
+                x, y = clamp(int(opts["x"]), int(opts["y"]),
+                             window.width(), window.height(), monitors)
+            else:
+                # The settings panel has no caret to sit beside, and an override-redirect window
+                # that is never placed lands in the corner: centre it on the primary screen.
+                asked = "centred"
+                g = app.primaryScreen().geometry()
+                x = g.x() + (g.width() - window.width()) // 2
+                y = g.y() + (g.height() - window.height()) // 2
             window.setPosition(x, y)
             # The size is reported with the position: a card that maps at 1x1 and positions "fine"
             # is the failure this line exists to make visible, and it happened here once.
-            print("PLACED %d %d (asked %s %s) size %dx%d"
-                  % (window.x(), window.y(), opts["x"], opts["y"], window.width(), window.height()),
+            print("PLACED %d %d (asked %s) size %dx%d"
+                  % (window.x(), window.y(), asked, window.width(), window.height()),
                   file=sys.stderr, flush=True)
-        QTimer.singleShot(40, place)
+        # The settings panel's height arrives with its state, a round trip later, so it is measured
+        # after that rather than at the finding card's 40 ms.
+        QTimer.singleShot(300 if settings_mode else 40, place)
 
-    QTimer.singleShot(timeout * 1000, app.quit)
+    # In settings mode timeout is 0, and a 0 ms timer would close the panel immediately.
+    if timeout:
+        QTimer.singleShot(timeout * 1000, app.quit)
     app.exec()
 
     if bridge.chosen["action"]:

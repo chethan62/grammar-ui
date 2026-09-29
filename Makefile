@@ -24,7 +24,8 @@ install:
 	install -m755 desktop/grammar-popup.py $(BINDIR)/grammar-popup.py
 	install -m644 desktop/grammar-card.qml $(BINDIR)/grammar-card.qml
 	sed 's|@BINDIR@|$(BINDIR)|' deployments/grammar-lookup.desktop > $(APPDIR)/grammar-lookup.desktop
-	chmod 644 $(APPDIR)/grammar-lookup.desktop
+	sed 's|@BINDIR@|$(BINDIR)|' deployments/grammar-settings.desktop > $(APPDIR)/grammar-settings.desktop
+	chmod 644 $(APPDIR)/grammar-lookup.desktop $(APPDIR)/grammar-settings.desktop
 	-update-desktop-database $(APPDIR) 2>/dev/null
 	-systemctl --user daemon-reload
 	@echo "Installed $(BINDIR)/grammar-{lookup,watch} and grammar-popup.py, plus the watcher unit."

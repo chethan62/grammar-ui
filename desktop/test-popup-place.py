@@ -153,6 +153,73 @@ def test_payload(popup):
        "with the status as the fallback: %r" % popup.api_error_message({}, 503))
 
 
+def test_settings(popup):
+    """The AI-runner panel's view of GET /v1/ai. Pure, so it runs headless.
+
+    A settings panel must render when the backend is down — that is exactly when someone opens it —
+    so every state the server can report is asserted here, including the ones that only produce a
+    warning line.
+    """
+    state = {
+        "provider": "ollama", "url": "http://127.0.0.1:11434", "model": "qwen2.5:1.5b",
+        "protocol": "ollama", "local": True, "hint": "0.9s warm", "keySet": False,
+        "reachable": True, "models": ["qwen2.5:1.5b", "qwen3.5:4b"], "writable": True,
+        "presets": [
+            {"id": "ollama", "label": "Ollama", "url": "http://127.0.0.1:11434",
+             "model": "qwen2.5:1.5b", "local": True, "hint": "h"},
+            {"id": "lmstudio", "label": "LM Studio", "url": "http://127.0.0.1:1234",
+             "model": "", "local": True, "hint": "h"},
+            {"id": "openrouter", "label": "OpenRouter", "url": "https://openrouter.ai/api/v1",
+             "model": "", "local": False, "keyEnv": "OPENROUTER_API_KEY", "hint": "h"},
+        ],
+    }
+    view = popup.settings_view(state)
+    ok([p["id"] for p in view["presets"]] == ["ollama", "lmstudio", "openrouter", "none"],
+       "every preset is offered and Off is last: %r" % [p["id"] for p in view["presets"]])
+    ok(view["provider"] == "ollama" and view["url"].endswith("11434"),
+       "the configured backend and its address are shown")
+    ok(view["models"] == ["qwen2.5:1.5b", "qwen3.5:4b"], "the models it reports are offered")
+    ok(view["reachable"] and "2 models" in view["status"],
+       "the status says it is answering: %r" % view["status"])
+    ok(view["warnings"] == [], "and a healthy local backend warns about nothing: %r" % view["warnings"])
+
+    # A configured model the server no longer lists must stay selectable, or the panel would open
+    # showing a model nobody can keep.
+    gone = popup.settings_view({"provider": "ollama", "model": "old:1b", "reachable": True,
+                                "models": ["new:2b"], "writable": True})
+    ok(gone["models"][0] == "old:1b" and "new:2b" in gone["models"],
+       "a configured model the server no longer lists stays pickable: %r" % gone["models"])
+
+    down = popup.settings_view({"provider": "lmstudio", "url": "http://127.0.0.1:1234",
+                                "writable": True})
+    ok(not down["reachable"] and "not answering" in down["status"] and down["models"] == [],
+       "a backend that is down still renders, and says so: %r" % down["status"])
+
+    cloud = popup.settings_view({"provider": "openrouter", "local": False, "writable": True,
+                                 "keyEnv": "OPENROUTER_API_KEY", "keySet": False})
+    ok(any("leaves this machine" in w for w in cloud["warnings"]),
+       "a cloud backend warns that the text leaves: %r" % cloud["warnings"])
+    ok(any("OPENROUTER_API_KEY" in w and "503" in w for w in cloud["warnings"]),
+       "and a missing key names the variable and its cost: %r" % cloud["warnings"])
+
+    lan = popup.settings_view({"provider": "ollama", "writable": False})
+    ok(lan["writable"] is False and any("Read-only" in w for w in lan["warnings"]),
+       "a request from another machine renders read-only: %r" % lan["warnings"])
+
+    empty = popup.settings_view({})
+    ok(empty["presets"][-1]["id"] == "none" and empty["status"] == "" and empty["models"] == [],
+       "an empty state still yields a usable panel: %r" % empty)
+    ok(popup.settings_view(None)["provider"] == "", "and None is not a crash either")
+
+    # The seam, same rule as the payload: every key the view produces is one the panel draws.
+    with open(os.path.join(HERE, "grammar-card.qml")) as fh:
+        qml = fh.read()
+    for key in ("presets", "models", "provider", "url", "hint", "warnings", "status"):
+        ok('s("%s"' % key in qml, "the panel draws the '%s' the view produces" % key)
+    ok("card.s(\"model\"" in qml and "writable" in qml,
+       "and the model field and the read-only flag reach the panel")
+
+
 def test_live():
     """The card in a real process, placed for real, reporting from the X server.
 
@@ -253,6 +320,7 @@ def main():
     if popup is not None:
         test_clamp(popup)
         test_payload(popup)
+        test_settings(popup)
     test_live()
     # A gate that can pass having run nothing is not a gate. This one reported "0 assertions -
     # passed" in CI once, with a green tick, on a runner where the card's module could not even be
