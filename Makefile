@@ -1,8 +1,11 @@
-# The UI is three static files: there is nothing to build, so install is a copy plus
-# the user unit. `make test` is the same gate CI runs.
+# The UI is three static files plus one python script: nothing to build, so install is a
+# copy plus the user unit and the launcher for the selection checker. `make test` is the
+# same gate CI runs.
 PORT ?= 8899
 DATADIR ?= $(HOME)/.local/share/grammar-ui
 UNITDIR ?= $(HOME)/.config/systemd/user
+BINDIR ?= $(HOME)/.local/bin
+APPDIR ?= $(HOME)/.local/share/applications
 
 .PHONY: all serve test install uninstall
 
@@ -15,17 +18,26 @@ serve:
 test:
 	node --check app.js
 	node test/esc.test.js
+	python3 desktop/test-lookup.py
 
 # Install for the current user: no sudo, and the unit never references a checkout.
 install:
-	install -d $(DATADIR) $(UNITDIR)
+	install -d $(DATADIR) $(UNITDIR) $(BINDIR) $(APPDIR)
 	install -m644 index.html app.js style.css $(DATADIR)/
 	install -m644 deployments/systemd/grammar-ui.service $(UNITDIR)/grammar-ui.service
+	install -m755 desktop/grammar-lookup.py $(BINDIR)/grammar-lookup
+	sed 's|@BINDIR@|$(BINDIR)|' deployments/grammar-lookup.desktop > $(APPDIR)/grammar-lookup.desktop
+	chmod 644 $(APPDIR)/grammar-lookup.desktop
+	-update-desktop-database $(APPDIR) 2>/dev/null
 	-systemctl --user daemon-reload
-	@echo "Installed $(DATADIR) and the user unit. Start it with:"
+	@echo "Installed $(DATADIR), the user unit and $(BINDIR)/grammar-lookup. Start it with:"
 	@echo "  systemctl --user enable --now grammar-ui"
+	@echo "The selection checker is bound to Ctrl+Alt+C (see the README); the binding takes"
+	@echo "effect at the next login, because kglobalaccel reads its config when it starts."
 
 uninstall:
 	-systemctl --user disable --now grammar-ui
 	rm -rf $(DATADIR) $(UNITDIR)/grammar-ui.service
+	rm -f $(BINDIR)/grammar-lookup $(APPDIR)/grammar-lookup.desktop
+	-update-desktop-database $(APPDIR) 2>/dev/null
 	-systemctl --user daemon-reload

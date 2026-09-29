@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Check my selection
+GenericName=Check selected text
+Comment=Check the text selected in any application against the local engine
+Exec=@BINDIR@/grammar-lookup
+Icon=grammar-ui
+Terminal=false
+Categories=Utility;TextTools;
+Keywords=grammar;spelling;check;selection;
+StartupNotify=false

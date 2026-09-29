@@ -19,3 +19,7 @@ jobs:
         run: node --check app.js
       - name: escaping
         run: node test/esc.test.js
+      # The desktop checker's fix logic and its dialog contract. The live section skips
+      # itself when no engine is running, which is why this can run in CI at all.
+      - name: selection checker
+        run: python3 desktop/test-lookup.py

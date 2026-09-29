@@ -23,12 +23,52 @@ Cross-origin requests work because grammar-server sends `Access-Control-Allow-Or
 `Test` asks the server for its version, so you can tell "wrong URL" from
 "server down".
 
+## Check text anywhere (no browser)
+
+`grammar-lookup` checks whatever is **selected in the application you are in** — an editor,
+a chat window, a terminal, a PDF, a text field — and needs no browser:
+
+1. select the text (any app — the primary selection is what gets checked)
+2. press **Ctrl+Alt+C**
+3. the findings appear in a native dialog: **Copy fixed** puts the corrected text on your
+   clipboard, **Show fixed** shows it instead, **Close** does nothing
+4. Ctrl+V replaces your selection
+
+The correction is the same one the web UI's *Fix all* produces, and it repeats until the
+text stops changing: the engine's sentence-capitalisation rule suggests `Teh` for a typo at
+the start of a sentence (it is correcting the capital, not the spelling), and only a second
+pass turns that into `The`.
+
+The dialog is `kdialog` on KDE and `zenity` elsewhere; if neither is present it falls back
+to a notification with the fix already on your clipboard. It never fails silently.
+
+```bash
+grammar-lookup                     # dialog, as the shortcut runs it
+GRAMMAR_NO_UI=1 grammar-lookup     # print the corrected text (handy in editors and scripts)
+GRAMMAR_API=http://cachyos.local:8875 grammar-lookup   # check against another machine
+GRAMMAR_LANG=en-GB grammar-lookup                      # check as a different language
+python3 desktop/test-lookup.py     # the gate: fix logic, dialog contract, live engine
+```
+
+**The binding takes effect at the next login.** kglobalaccel reads `kglobalshortcutsrc`
+when it starts, so `make install` writes `Ctrl+Alt+C` for the launcher but the running
+session keeps its old set; log out and back in (or add it in System Settings → Shortcuts).
+
+Two things it deliberately does not do. It cannot paste the fix for you: KWin does not
+implement the Wayland virtual-keyboard protocol (`wtype` says so) and `ydotoold` is not
+running, so the last Ctrl+V is yours — it does paste automatically if either becomes
+available. And it checks on demand, not while you type; that would need an input method
+(fcitx5/ibus), which is a different project.
+
 ## Install (Linux, current user)
 
 ```bash
 make install
 systemctl --user enable --now grammar-ui
 ```
+
+Also installs `~/.local/bin/grammar-lookup` and its launcher entry, which is what
+Ctrl+Alt+C runs.
 
 Copies the three files to `~/.local/share/grammar-ui` and installs a user unit that
 serves them on `0.0.0.0:8899` (python's stdlib server; no dependency to keep
