@@ -20,7 +20,7 @@
      panel is its face, not its implementation. Collapsed by default: checking
      text is the job, and choosing a model is something you do once. -->
 <details class="aipanel" id="aiPanel">
-  <summary><span class="aidot" id="aiDot"></span><span id="aiSummary">AI backend</span></summary>
+  <summary><span class="aidot" id="aiDot"></span><span class="aiset">Settings &middot; AI runner</span><span class="aival" id="aiSummary">checking…</span></summary>
   <div class="aibody" id="aiBody"><p class="empty">Loading…</p></div>
 </details>
 <main>
@@ -38,10 +38,11 @@
         <option value="clear">clearer</option>
         <option value="simple">simpler</option>
       </select>
-      <select id="tone" title="Tone (a small model pads the text rather than fixing it, so this is off by default)">
+      <select id="tone" title="Tone for the rephrase — a small model pads text rather than fixing it, so this is off by default">
         <option value="">no tone change</option>
-        <option value="formal">formal</option>
+        <option value="professional">professional</option>
         <option value="casual">casual</option>
+        <option value="formal">formal</option>
       </select>
       <label class="check" title="Include style hints (wordiness, passive voice) and not just errors"><!-- style --><input type="checkbox" id="level" checked> style hints</label>
       <button class="ghost" id="copyBtn" onclick="copyText()">Copy text</button>

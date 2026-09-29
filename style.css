@@ -77,9 +77,12 @@ input[type=text],input:not([type]),select,textarea{font-family:inherit;font-size
 .aipanel{flex-shrink:0;background:var(--surface);border-bottom:1px solid var(--border)}
 .aipanel summary{display:flex;align-items:center;gap:.55rem;padding:.55rem var(--pad);font-size:var(--t-sm);color:var(--muted);cursor:pointer;list-style:none}
 .aipanel summary::-webkit-details-marker{display:none}
-.aipanel summary::after{content:"";width:.4rem;height:.4rem;margin-left:auto;border-right:1.5px solid var(--faint);border-bottom:1.5px solid var(--faint);transform:rotate(45deg) translate(-.1rem,-.1rem);transition:transform .15s}
+.aipanel summary::after{content:"";width:.4rem;height:.4rem;margin-left:.6rem;border-right:1.5px solid var(--faint);border-bottom:1.5px solid var(--faint);transform:rotate(45deg) translate(-.1rem,-.1rem);transition:transform .15s}
 .aipanel[open] summary::after{transform:rotate(-135deg) translate(-.1rem,-.1rem)}
 .aipanel summary:hover{color:var(--fg)}
+.aiset{font-weight:600}
+.aival{margin-left:auto;font-family:var(--mono);font-size:var(--t-xs);color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.airow label{align-self:center;font-size:var(--t-xs);font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
 .aidot{width:.44rem;height:.44rem;border-radius:50%;background:var(--faint);flex-shrink:0}
 .aidot.on{background:var(--ok)}
 .aidot.bad{background:var(--err)}

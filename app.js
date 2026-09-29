@@ -334,17 +334,19 @@ async function loadAI(){
     ai=await r.json();
     renderAI(ai);
   }catch(e){
-    ai=null;aiDot('bad');aiSummaryEl.textContent='AI backend · unavailable';
+    ai=null;aiDot('bad');aiSummaryEl.textContent='unavailable';
     aiBodyEl.innerHTML='<p class="empty">'+esc(e.message)+' — this server has no /v1/ai. Set a model in its config, or update it.</p>';
   }
 }
 
 function renderAI(st){
   aiDot(st.reachable?'ok':'bad');
+  // The row is a setting, not a status: the label lives in the HTML, so this
+  // writes only the current choice.
   var name=st.provider?(st.provider+(st.model?' · '+st.model:'')):'off';
-  aiSummaryEl.textContent='AI backend · '+name+(st.reachable?'':' · not answering');
+  aiSummaryEl.textContent=name+(st.reachable?'':' · not answering');
 
-  var h='<div class="airow">',i;
+  var h='<div class="airow"><label>Runner</label>',i;
   for(i=0;i<st.presets.length;i++){
     var p=st.presets[i];
     h+='<button class="aipick'+(p.id===st.provider?' active':'')+'" data-provider="'+esc(p.id)+'"'+(st.writable?'':' disabled')+'>'+esc(p.label)+'</button>';
