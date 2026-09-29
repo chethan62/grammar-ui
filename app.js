@@ -215,10 +215,16 @@ async function rephrase(){
 
 function renderRephrase(s,d){
   if(!d.candidates||!d.candidates.length)return;
-  var html='<div class="match"><div class="msg">Rephrase · '+esc(d.model)+' · '+d.elapsedMs+' ms</div>'+
+  // "rephrase" on the block, so the buttons in here are never confused with a match's
+  // suggestion rows (same .reps/.rep classes, different meaning, different handler).
+  var html='<div class="match rephrase"><div class="msg">Rephrase · '+esc(d.model)+' · '+d.elapsedMs+' ms</div>'+
     '<div class="reps">';
+  // The source sentence travels with the buttons: a candidate is only valid for the
+  // text it was computed from, and the text can change between the request and the
+  // click (typing, Fix all, Fix sentence). See the click handler.
   for(var i=0;i<d.candidates.length;i++)
-    html+='<button class="rep" data-rep-start="'+s.start+'" data-rep-end="'+s.end+'">'+esc(d.candidates[i])+'</button>';
+    html+='<button class="rep" data-rep-start="'+s.start+'" data-rep-end="'+s.end+'"'+
+      ' data-rep-src="'+esc(s.text)+'">'+esc(d.candidates[i])+'</button>';
   html+='</div><div class="rule">click an alternative to replace the sentence</div></div>';
   resEl.insertAdjacentHTML('afterbegin',html);
 }
@@ -226,7 +232,16 @@ function renderRephrase(s,d){
 resEl.addEventListener('click',function(e){
   var b=e.target.closest('.rep');if(!b)return;
   if(b.hasAttribute('data-rep-start')){
-    replaceRange(+b.getAttribute('data-rep-start'),+b.getAttribute('data-rep-end'),b.textContent);return;
+    var st=+b.getAttribute('data-rep-start'),en=+b.getAttribute('data-rep-end');
+    // Applying a candidate splices the range the sentence had when the model answered.
+    // If the text has moved on, that range no longer covers it: the click would cut a
+    // span out of the wrong place and silently wreck the document (measured: "Yes. " was
+    // dropped and a phrase duplicated). Stale blocks are dropped instead.
+    if(ta.value.slice(st,en)!==b.getAttribute('data-rep-src')){
+      var stale=b.closest('.rephrase');if(stale)stale.remove();
+      return;
+    }
+    replaceRange(st,en,b.textContent);return;
   }
   if(b.hasAttribute('data-fix')){
     fixSentence(+b.getAttribute('data-fix'));return;
@@ -235,6 +250,12 @@ resEl.addEventListener('click',function(e){
 });
 ta.addEventListener('input',function(){
   statsEl.textContent=ta.value.length+' ch · '+words(ta.value)+' w';
+  // Text changed: any rephrase candidate on screen was computed for the old text, so
+  // take the buttons away rather than leave a click that cannot be applied. (The click
+  // handler still checks, because Fix all and Fix sentence change the text without
+  // firing this event.)
+  var staleReps=resEl.querySelectorAll('.rephrase');
+  for(var i=0;i<staleReps.length;i++)staleReps[i].remove();
   clearTimeout(timer);timer=setTimeout(run,400);
 });
 langEl.addEventListener('change',function(){run()});
