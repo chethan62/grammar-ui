@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  # So a run can be asked for by hand: a push does not always produce one (measured — a commit
+  # landed on main with no run created for it, minutes after three pushes that each produced one),
+  # and without this trigger there is no way to ask for the verdict that push should have given.
+  workflow_dispatch:
 
 jobs:
   check:
