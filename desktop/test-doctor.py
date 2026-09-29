@@ -85,11 +85,11 @@ def test_it_can_fail():
     ok("no answer from http://127.0.0.1:9" in out,
        "in the terms of what it asked: %r" % [l for l in out.splitlines() if "no answer" in l][:1])
     # Both engine checks must fail, not just the first: the lint check reaches the same server and
-    # would otherwise report a healthy engine that cannot check anything. Counted as rows — the
-    # summary line also contains the word FAIL, which made this read 3.
-    ok(out.count("\n  FAIL") == 2,
-       "and the lint check fails with it, rather than reporting a working engine: %d failing rows"
-       % out.count("\n  FAIL"))
+    # would otherwise report a healthy engine that cannot check anything. Asserted by row name, not
+    # by count: a runner with nothing installed fails five rows, and an earlier version of this
+    # demanded exactly two, which was this machine's state rather than the rule.
+    ok("FAIL engine " in out and "FAIL engine lints" in out,
+       "both engine rows fail with it, rather than the lint check reporting a working engine")
 
 
 def test_it_can_pass():
