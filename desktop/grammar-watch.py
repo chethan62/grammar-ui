@@ -22,6 +22,7 @@ way; nothing can, short of an input method, because the API is the only door int
 
 import importlib.machinery
 import importlib.util
+import json
 import os
 import shutil
 import signal
@@ -143,25 +144,80 @@ def notify_actions(summary, body, actions=(("fix", "Fix it"), ("copy", "Copy fix
         return ""
 
 
-def popup_actions(issue, position):
-    """The card next to the caret. Returns the key pressed, "" if dismissed, or None when no card
-    is possible at all (no display, no GTK) — the caller then falls back to a toast.
+def alternatives(matches):
+    """Every replacement the engine offered for the first finding, in its own order.
 
-    Its own process, the same argv-in/word-out contract notify-send has, so nothing GTK touches
-    this daemon. The issue is one dict — old, new, reason, badge, more — which is also the shape
-    a future IPC would carry, if this ever grows a second host.
+    The card used to receive only replacements[0], so a spelling fix offered "Teh" and hid "the",
+    "tea" and "tech" — the engine had already found them. Pure, so the ordering and the
+    de-duplication are testable without a display.
+    """
+    out = []
+    for m in sorted(matches, key=lambda m: m["offset"]):
+        if not m.get("replacements"):
+            continue
+        for rep in m["replacements"]:
+            value = (rep.get("value") or "").strip()
+            if value and value not in out:
+                out.append(value)
+        break        # the card shows one finding at a time, so its fixes are what belongs here
+    return out
+
+
+def first_span(matches):
+    """Where the finding the card is showing sits, as (offset, length) in the checked window.
+
+    It must pick the same match alternatives() does - same sort, same skip of findings that carry
+    no replacement - or a chip would rewrite the text somewhere else in the sentence. The pair is
+    asserted together in test-watch.py for that reason.
+    """
+    for m in sorted(matches, key=lambda m: m["offset"]):
+        if m.get("replacements"):
+            return int(m["offset"]), int(m["length"])
+    return 0, 0
+
+
+def parse_reply(text):
+    """The card's answer: its JSON line, or the older plain word. Pure.
+
+    Tolerant because this crosses a process boundary, and anything unrecognised is a dismissal
+    rather than a fix — a garbled line must never edit the user's document.
+    """
+    text = (text or "").strip()
+    if not text:
+        return None
+    if not text.startswith("{"):
+        # The pre-JSON contract, still accepted: "fix" meant the sentence, "copy" the clipboard.
+        return {"action": "sentence", "text": ""} if text == "fix" else (
+            {"action": "copy", "text": ""} if text == "copy" else None)
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(data, dict) or not data.get("action"):
+        return None
+    return {"action": str(data["action"]), "text": str(data.get("text") or "")}
+
+
+def popup_actions(issue, position):
+    """The card next to the caret. Returns {"action": ..., "text": ...}, or None when no card is
+    possible at all (no display, no GTK) — the caller then falls back to a toast.
+
+    Its own process, so nothing GTK touches this daemon. The payload is one dict — old, reason,
+    badge, alts, more — which is also the shape a future IPC would carry, if this ever grows a
+    second host. It travels on stdin rather than in argv because the alternatives are a list, and
+    a list on a command line is a quoting bug waiting to happen.
     """
     script = os.path.join(HERE, "grammar-popup.py")
     if position is None or not os.path.exists(script):
         return None
-    argv = [sys.executable, script,
-            "--x", str(position[0]), "--y", str(position[1]),
-            "--old", issue.get("old", ""), "--new", issue.get("new", ""),
-            "--reason", issue.get("reason", ""), "--badge", issue.get("badge", "")]
+    argv = [sys.executable, script, "--x", str(position[0]), "--y", str(position[1])]
+    payload = {"old": issue.get("old", ""), "reason": issue.get("reason", ""),
+               "badge": issue.get("badge", ""), "alts": issue.get("alts") or []}
     if issue.get("more"):
-        argv += ["--more", issue["more"]]
+        payload["more"] = issue["more"]
     try:
-        proc = subprocess.run(argv, capture_output=True, timeout=30)
+        proc = subprocess.run(argv, input=json.dumps(payload).encode(),
+                              capture_output=True, timeout=30)
     except subprocess.SubprocessError:
         return None
     if proc.returncode != 0:
@@ -170,22 +226,25 @@ def popup_actions(issue, position):
         print("grammar-watch: pop-up exited %d: %s"
               % (proc.returncode, proc.stderr.decode().strip()[:200]), file=sys.stderr, flush=True)
         return None
-    return proc.stdout.decode().strip()
+    return parse_reply(proc.stdout.decode())
 
 
 def ask(issue, position=None):
-    """Show it where it belongs: a card at the caret when there is a diff to show, else a toast.
+    """Show it where it belongs: a card at the caret when there is something to apply, else a toast.
 
     A card with no diff is not a card — "the text changed, nothing was applied" is a message, and
     messages belong in a notification. Same for anything without a replacement to offer.
     """
-    if issue.get("new"):
-        key = popup_actions(issue, position)
-        if key is not None:
-            return key
+    if issue.get("new") or issue.get("alts"):
+        answer = popup_actions(issue, position)
+        if answer is not None:
+            return answer
     summary = issue.get("summary") or ("%s → %s" % (issue["old"], issue["new"]))
     body = issue.get("more") or issue.get("reason") or "Fix it to correct this in place."
-    return notify_actions(summary, body)
+    key = notify_actions(summary, body)
+    if not key:
+        return {}
+    return {"action": "sentence" if key == "fix" else key, "text": ""}
 
 
 class Watcher:
@@ -291,6 +350,13 @@ class Watcher:
         found = suggestions(piece, matches)
         old, new, reason = found[0]
         issue = {"old": old, "new": new, "reason": reason,
+                 # The card offers every fix the engine returned for this finding, not just the
+                 # first: the alternatives were being thrown away a line later.
+                 "alts": alternatives(matches),
+                 # The span a chip replaces: the finding's own words, absolute in the document.
+                 # Fix sentence is the button that takes the whole line.
+                 "span": [begin + start + first_span(matches)[0],
+                          begin + start + first_span(matches)[0] + first_span(matches)[1]],
                  # The badge is the engine's real time, not a decoration: it is how the user sees
                  # whether a suggestion is instant or cost something.
                  "badge": "Rules engine · %d ms" % round(self.last_engine_ms or 0),
@@ -314,16 +380,30 @@ class Watcher:
         return None
 
     def offer(self, start, end, piece, fixed, issue, position=None):
-        """Ask, then act — and only act on the text we actually checked."""
+        """Ask, then act — and only act on the text we actually checked.
+
+        Three answers are actable: a chip names the replacement for this finding's own words, Fix
+        sentence applies every correction in the line at once, and Copy puts that line on the
+        clipboard. A chip replaces issue["span"] only — start/end is the whole sentence here, so
+        using them for a chip would rewrite a sentence with one word.
+        """
         try:
-            key = self.ask(issue, position)
-            if key not in ("fix", "copy"):
+            answer = self.ask(issue, position) or {}
+            if not isinstance(answer, dict):
+                # A stub, or an older caller, may still answer in a single word: "fix" has always
+                # meant "apply the whole sentence".
+                answer = {"action": "sentence" if answer == "fix" else "", "text": ""}
+            action = answer.get("action")
+            if action not in ("replace", "sentence", "copy"):
                 return
             if not self.unchanged(start, end, piece):
                 self.ask({"old": "", "new": "", "reason": "", "summary": "The text changed",
                           "more": "Nothing was applied. Ctrl+Alt+C checks a selection."})
                 return
-            if key == "fix":
+            if action == "replace":
+                span = issue.get("span") or [start, end]
+                self.replace(span[0], span[1], answer.get("text") or issue.get("new") or "")
+            elif action == "sentence":
                 self.replace(start, end, fixed)
             else:
                 self.client.copy(fixed)

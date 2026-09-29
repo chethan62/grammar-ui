@@ -91,6 +91,30 @@ def test_clamp(popup):
        "with no monitors reported, the request is not mangled")
 
 
+def test_payload(popup):
+    """The card's input contract, which is pure: stdin JSON, the old argv flags, and junk."""
+    got = popup.parse_payload(
+        '{"old": "teh", "reason": "spelling", "alts": ["Teh", "the", "the"], "badge": "12 ms"}')
+    ok(got["old"] == "teh" and got["reason"] == "spelling",
+       "the payload's fields arrive: %r" % got)
+    ok(got["alts"] == ["Teh", "the"],
+       "alternatives are de-duplicated and kept in the engine's order: %r" % got["alts"])
+    ok(got["new"] == "Teh", "the first alternative fills the older single-fix field: %r" % got)
+    ok(popup.parse_payload("nonsense on stdin")["alts"] == [],
+       "junk on stdin is not a payload, and is not an error either")
+    ok(popup.parse_payload("", ["--old", "go", "--new", "goes", "--reason", "x"])["new"] == "goes",
+       "the argv form still works from a shell")
+    many = popup.parse_payload('{"alts": [%s]}' % ", ".join('"a%d"' % i for i in range(12)))
+    ok(len(many["alts"]) == popup.MAX_CHIPS,
+       "twelve alternatives are capped to a card, not a menu: %d" % len(many["alts"]))
+    ok(popup.card_markup("teh", "the", chips=True) == "<s>teh</s>",
+       "with chips the headline is the offender alone, so the first fix is not printed twice")
+    ok(popup.action_json("replace", "the") == '{"action": "replace", "text": "the"}',
+       "and the answer is one JSON line: %r" % popup.action_json("replace", "the"))
+    ok(popup.action_json("copy") == '{"action": "copy"}',
+       "a copy answer carries no text: %r" % popup.action_json("copy"))
+
+
 def test_live():
     """The card in a real process, placed for real, reporting from the X server."""
     if not os.environ.get("DISPLAY"):
@@ -163,6 +187,7 @@ def main():
         popup = None
     if popup is not None:
         test_clamp(popup)
+        test_payload(popup)
     test_live()
     print("grammar-popup-place: %d assertions - %s" % (PASS + FAIL, "passed" if not FAIL else "FAILED"))
     return 1 if FAIL else 0

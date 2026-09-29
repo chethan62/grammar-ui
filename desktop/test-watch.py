@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import json
 import time
 
 try:
@@ -424,31 +425,39 @@ def test_live():
 
 
 def test_popup(tmp):
-    """The pop-up's contract: argv in, one word out, exit 2 when it cannot run at all.
+    """The pop-up's contract: JSON payload on stdin, one JSON line out, exit 2 when it cannot run.
 
     Checked with a stub standing in for the pop-up script, because the real one opens a window
-    for twelve seconds — the same reason the dialog contract is checked with stubs on PATH.
+    for twelve seconds — the same reason the dialog contract is checked with stubs on PATH. The
+    payload goes on stdin, not in argv, because it carries the alternatives as a list; the caret's
+    coordinates stay in argv, where a pair of numbers belongs.
     """
     stubdir = tempfile.mkdtemp(prefix="grammar-popup-")
     stub = os.path.join(stubdir, "grammar-popup.py")
     with open(stub, "w") as fh:
-        fh.write('import os, sys\n'
-                 'open(os.environ["REC"], "w").write("\\n".join(sys.argv))\n'
-                 'print("fix")\n')
+        fh.write('import json, os, sys\n'
+                 'open(os.environ["REC"], "w").write(sys.stdin.read())\n'
+                 'open(os.environ["REC"] + ".argv", "w").write("\\n".join(sys.argv))\n'
+                 'print(json.dumps({"action": "replace", "text": "goes"}))\n')
     saved_here, saved_rec = watch.HERE, os.environ.get("REC")
-    watch.HERE, os.environ["REC"] = stubdir, os.path.join(stubdir, "argv")
+    watch.HERE, os.environ["REC"] = stubdir, os.path.join(stubdir, "payload")
     try:
         issue = {"old": "go", "new": "goes", "reason": "verb form",
-                 "badge": "Rules engine · 12 ms", "more": "teh → the"}
-        key = watch.popup_actions(issue, (640, 480))
-        argv = open(os.environ["REC"]).read().splitlines()
-        ok(key == "fix", "the pop-up's answer comes back: %r" % key)
-        ok("--old" in argv and "go" in argv and "--new" in argv and "goes" in argv,
-           "the card is given the diff: %r" % argv)
-        ok("--reason" in argv and "verb form" in argv and "--badge" in argv,
-           "and the reason and the measured badge: %r" % argv)
+                 "badge": "Rules engine · 12 ms", "more": "teh → the",
+                 "alts": ["goes", "went"]}
+        answer = watch.popup_actions(issue, (640, 480))
+        payload = json.load(open(os.environ["REC"]))
+        argv = open(os.environ["REC"] + ".argv").read().splitlines()
+        ok(answer == {"action": "replace", "text": "goes"},
+           "the card's JSON answer comes back whole: %r" % answer)
+        ok(payload.get("old") == "go" and payload.get("reason") == "verb form",
+           "the card is given the finding and its reason: %r" % payload)
+        ok(payload.get("alts") == ["goes", "went"],
+           "and every alternative the engine offered, not just the first: %r" % payload)
+        ok(payload.get("badge") == "Rules engine · 12 ms",
+           "and the measured badge: %r" % payload)
         ok("--x" in argv and "640" in argv and "480" in argv,
-           "and the caret's coordinates: %r" % argv)
+           "and the caret's coordinates, still in argv: %r" % argv)
         ok(watch.popup_actions(issue, None) is None,
            "no caret position: no card, so the caller can use a toast")
         # A pop-up that fails for ANY reason must mean "no pop-up", not "the user dismissed it".
@@ -473,10 +482,31 @@ def test_popup(tmp):
     saved_path = os.environ["PATH"]
     os.environ["PATH"] = tmp + ":" + saved_path
     try:
-        ok(watch.ask({"old": "go", "new": "goes", "reason": "verb form"}, None) == "copy",
+        ok(watch.ask({"old": "go", "new": "goes", "reason": "verb form"}, None)
+           == {"action": "copy", "text": ""},
            "with no card possible, the notification answers instead")
     finally:
         os.environ["PATH"] = saved_path
+
+    # The two halves of the card's payload that must agree with each other: the alternatives come
+    # from the same finding first_span() points at, or a chip would rewrite different words.
+    ms = [{"offset": 12, "length": 3, "message": "m", "replacements": [{"value": "Teh"}]},
+          {"offset": 3, "length": 2, "message": "m",
+           "replacements": [{"value": "the"}, {"value": "tea"}, {"value": "the"}]},
+          {"offset": 20, "length": 4, "message": "m", "replacements": []}]
+    ok(watch.alternatives(ms) == ["the", "tea"],
+       "every alternative, de-duplicated and in the engine's order: %r" % watch.alternatives(ms))
+    ok(watch.first_span(ms) == (3, 2),
+       "and the span points at that same finding: %r" % (watch.first_span(ms),))
+    ok(watch.alternatives([{"offset": 0, "length": 1, "replacements": []}]) == [],
+       "a finding with no replacement offers no chips")
+    ok(watch.parse_reply('{"action": "replace", "text": "the"}')
+       == {"action": "replace", "text": "the"}, "the JSON reply is read")
+    ok(watch.parse_reply("fix") == {"action": "sentence", "text": ""},
+       "and the older plain word still means the sentence")
+    ok(watch.parse_reply("partial noise") is None,
+       "but anything unparseable is a dismissal, never an edit")
+    ok(watch.parse_reply("") is None, "and silence is a dismissal too")
 
     # the position arithmetic, which is pure — an edge caret is the common case, not the exotic one
     try:
