@@ -1,7 +1,8 @@
 # grammar-ui
 
 The desktop side of [grammar-server](https://github.com/chethan62/grammar-server): a selection
-checker, a typing watcher, and the suggestion card. **Python and stdlib only — nothing to build,
+checker, a typing watcher, and the suggestion card. **Python and stdlib, plus Qt (PySide6) for the
+card — nothing to build,
 no browser, no dependencies.**
 
 There was a browser UI here. It was removed at the user's request: the card at the caret is where
@@ -73,7 +74,7 @@ We should arrange a meeting to discuss the report.   ← click one to replace th
 - **Rephrase** is made by the card itself, not the watcher. The card is a local process on
   loopback and it owns the interaction, so the few seconds a small model needs are spent there
   instead of holding up every other application's suggestions. The call runs on a thread and
-  returns through the main loop, because GTK is not thread-safe and a frozen card is worse than no
+  returns through the UI thread, because Qt is not thread-safe either and a frozen card is worse than a
   card. The sentence sent is the **corrected** one: handing a small model your own errors invites
   it to preserve them.
 - The card **never takes focus**, so typing continues while it is up. That is also why Enter and

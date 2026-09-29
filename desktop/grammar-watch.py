@@ -200,10 +200,11 @@ def parse_reply(text):
 
 def popup_actions(issue, position):
     """The card next to the caret. Returns {"action": ..., "text": ...}, or None when no card is
-    possible at all (no display, no GTK) — the caller then falls back to a toast.
+    possible at all (no display, no Qt) — the caller then falls back to a toast.
 
-    Its own process, so nothing GTK touches this daemon. The payload is one dict — old, reason,
-    badge, alts, more — which is also the shape a future IPC would carry, if this ever grows a
+    Its own process, so nothing Qt touches this daemon. The payload is one dict — old, reason,
+    badge, alts, more, api, sentence — which is also the shape a future IPC would carry, if this
+    ever grows a
     second host. It travels on stdin rather than in argv because the alternatives are a list, and
     a list on a command line is a quoting bug waiting to happen.
     """

@@ -550,18 +550,21 @@ def test_popup(tmp):
     try:
         popup = load("grammar_popup", "grammar-popup.py")
     except SystemExit:
-        print("  pop-up geometry: skipped (no GTK here)")
+        print("  pop-up geometry: skipped (no Qt here)")
         return
-    # The card renders the document's own text as Pango markup, so it must escape it: an '&' or
-    # '<' from the user's writing would otherwise break the label or inject markup.
-    markup = popup.card_markup("AT&T <b>", "A&T", reason="wordy phrase \"<x>\"")
-    ok("<s>AT&amp;T &lt;b&gt;</s>" in markup, "the old text is struck through and escaped: %r" % markup)
-    ok("<b>A&amp;T</b>" in markup, "the replacement is bold and escaped: %r" % markup)
-    ok("&lt;x&gt;" in markup and "<b>AT" not in markup, "the reason is escaped too: %r" % markup)
-    ok(popup.card_markup("go", "goes", badge="Rules engine · 12 ms").count("<s>go</s>") == 1,
-       "a diff carries the original once")
-    ok("Rules engine" in popup.card_markup("go", "goes", badge="Rules engine · 12 ms"),
-       "and the badge is on the card")
+    # The card renders plain text now, so escaping is structural rather than hand-rolled — and that
+    # is worth pinning, because the failure it prevents was real: the GTK card had to escape the
+    # document's own writing before handing it to Pango, or an '&' in it broke the label. If the
+    # surface ever switches to rich text, this fails instead of the card.
+    here = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(here, "grammar-card.qml")) as fh:
+        qml = fh.read()
+    ok("RichText" not in qml,
+       "the card draws plain text, so the document's own writing cannot become markup")
+    # And the other half of the seam: every field the watcher puts in the payload is one the card
+    # actually draws. A key renamed on one side and not the other is a silently blank line.
+    for key in ("old", "reason", "badge", "alts", "more", "api", "sentence"):
+        ok("payload.%s" % key in qml, "the card draws the '%s' the watcher sends" % key)
 
     monitors = [(0, 0, 1920, 1080)]
     ok(popup.clamp(500, 400, 200, 60, monitors) == (500, 400), "an ordinary caret stays put")

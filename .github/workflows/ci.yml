@@ -17,10 +17,13 @@ jobs:
         run: python3 desktop/test-lookup.py
       - name: typing watcher
         run: python3 desktop/test-watch.py
-      - name: GTK typelib for the pop-up gate
-        # Without this the runner has gi but no Gtk typelib, so the pop-up's own import guard
-        # exits 2 and the gate can only report "0 assertions - passed". With it, the clamp and
-        # payload assertions genuinely run here.
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq gir1.2-gtk-3.0
+      - name: Qt and QML for the pop-up gate
+        # Without this the runner cannot import PySide6, the pop-up's own import guard exits 2 and
+        # the gate can only report "0 assertions - passed" - a vacuous green. With it, the clamp,
+        # payload and palette assertions genuinely run here.
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq python3-pyside6.qml \
+            || pip install --quiet --break-system-packages PySide6
       - name: caret pop-up placement
         run: python3 desktop/test-popup-place.py

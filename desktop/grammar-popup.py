@@ -1,38 +1,30 @@
 #!/usr/bin/python3
 """The suggestion card: what is wrong, every fix the engine offered, and a rephrase on request.
 
-Its own process on purpose. The watcher asks it the way it asks notify-send — payload in, one
-JSON line out — so no GTK state lands in the daemon and a card that dies cannot take the watcher
-with it.
+Its own process on purpose. The watcher asks it the way it asks notify-send — payload in, one JSON
+line out — so no UI state lands in the daemon and a card that dies cannot take the watcher with it.
 
-The card, top to bottom:
+**The surface is QML.** It was GTK3, and GTK3 with Breeze is ~90% Breeze's own decisions: every
+attempt to design the card came back looking like a stock dialog. QML puts the surface, the chips,
+the spacing and the entrance under our control while the colours still come from the desktop's
+palette, so the card belongs on this desktop instead of merely appearing on it. This file is the
+host: it parses the payload, positions the window, and owns the one network call.
 
-* the offending text struck through, and the rule's own one-line reason;
-* a chip per replacement the engine returned. Clicking a chip applies *that* one — the previous
-  card threw all but the first away, which is how a spelling fix ended up offering only "Teh"
-  when the engine had also suggested "the", "tea" and "tech";
-* Fix sentence, which applies every non-overlapping correction in the line at once (the watcher
-  computes that text, not this process);
-* Copy, for when the destination is not the document; and Ignore, which is a real answer;
-* a tone and an intent, and Rephrase.
+The card, top to bottom: the offending text struck through with the engine's measured time beside
+it; the rule's one-line reason; every replacement the engine returned, best-first, the first wearing
+the accent; Fix sentence / Copy / Ignore; and — when the watcher sent an engine address and the
+sentence — a tone, an intent and Rephrase, whose alternatives appear as flat rows under their own
+heading.
 
-**This process makes the rephrase call itself.** It is a local process on loopback and it owns
-the interaction, so the few seconds a small model needs are spent here rather than inside the
-watcher's ask path, where they would hold every other application's suggestions while the user
-waited. The call runs on a thread and comes back through GLib.idle_add, because GTK is not
-thread-safe and a frozen card is worse than no card. No browser is involved in this path: when
-the chips come back they are answered with the same one-line contract as any other button.
+**This process makes the rephrase call itself.** It is a local process on loopback and it owns the
+interaction, so the few seconds a small model needs are spent here rather than inside the watcher's
+ask path, where they would hold every other application's suggestions while the user waited.
 
-It follows the desktop's theme instead of hardcoding one, and it never takes focus
-(accept_focus False plus a POPUP_MENU window), so typing in the application continues while it
-is up. That last property also means Enter and Escape cannot work: the card never receives key
-events, by design. Clicking is the interaction, and the notification covers the case where no
-card can be shown.
-
-Positioning: on Wayland a client cannot choose its own position, so this asks for the X11 backend
-before GTK starts. Measured: X11 honours the caret's coordinates, while the Wayland backend
-cannot map a parentless popup at all — "Gdk-WARNING: Couldn't map as window ... as popup because
-it doesn't have a parent" — and lands wherever the compositor likes.
+Positioning: under Wayland a client cannot choose its own position, so this asks for the X11 backend
+before Qt starts (QT_QPA_PLATFORM=xcb, the same trick GDK_BACKEND=x11 was) and sets
+BypassWindowManagerHint so the compositor neither moves nor decorates the window. The card never
+takes focus, so typing continues while it is up — which is also why Enter and Escape do nothing:
+clicking is the interaction, and the notification covers the case where no card can be shown.
 
 Input, one of two ways:
 
@@ -42,13 +34,13 @@ Input, one of two ways:
        "api": "http://127.0.0.1:8875", "sentence": "She go to the office."}
 * the old argv flags, for a shell: --old --new --reason --badge --more
 
-Either way: --x/--y <px> position it at the caret, --timeout <s> is how long it stays up (12).
+Either way: --x/--y <px> position it at the caret, --timeout <s> how long it stays up (12).
 
 Prints one JSON line when an action is taken — {"action": "replace", "text": "the"},
-{"action": "sentence"}, {"action": "sentence", "text": "<a rephrased line>"}, {"action": "copy"}
-— and nothing if it was dismissed or expired. Exits 2 when no pop-up is possible at all (no
-display, no GTK) so the caller can fall back to a notification. On stderr: PLACED <x> <y>
-(asked <x> <y>), so a test can tell placement from luck.
+{"action": "sentence"}, {"action": "sentence", "text": "<a rephrased line>"}, {"action": "copy"} —
+and nothing if it was dismissed or expired. Exits 2 when no card is possible at all (no display, no
+Qt) so the caller can fall back to a notification. On stderr: PLACED <x> <y> (asked <x> <y>), so a
+test can tell placement from luck.
 """
 
 import json
@@ -57,31 +49,25 @@ import sys
 import threading
 import urllib.error
 import urllib.request
-from xml.sax.saxutils import escape
 
-os.environ.setdefault("GDK_BACKEND", "x11")  # before Gtk: positioning needs the X11 backend
-
-try:
-    import gi
-    gi.require_version("Gtk", "3.0")
-    from gi.repository import Gtk, Gdk, GLib
-except Exception as exc:  # noqa: BLE001 - any failure here means "use a notification"
-    print("no pop-up: %s" % exc, file=sys.stderr)
-    sys.exit(2)
+# Before Qt starts: positioning needs the X server, exactly as the GTK card needed GDK_BACKEND=x11.
+os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
 
 MAX_CHIPS = 6          # a card, not a menu: the engine's first few are the useful ones
-MAX_CANDIDATES = 3     # the model's alternatives, shown in place of the fixes
+MAX_CANDIDATES = 3     # the model's alternatives, shown as rows in the rephrase section
 REPHRASE_TIMEOUT = 90  # a cold local model on this CPU has taken 6s; the server caps it anyway
 TONES = ("", "professional", "casual", "formal")
 INTENTS = ("", "concise", "clear", "simple")
 
 
+# ---- the pure core: the toolkit does not own any of this ---------------------------------------
+
 def parse_payload(raw, argv=None):
     """The card's content, from stdin JSON or the argv flags. Pure, so it needs no display.
 
-    Tolerant on purpose: a card that refuses to render because one field is the wrong type is
-    worse than a card with a missing line. Unknown keys are ignored, so the watcher may grow the
-    payload without breaking an older card.
+    Tolerant on purpose: a card that refuses to render because one field is the wrong type is worse
+    than a card with a missing line. Unknown keys are ignored, so the watcher may grow the payload
+    without breaking an older card.
     """
     data = {}
     if isinstance(raw, dict):
@@ -116,6 +102,28 @@ def parse_payload(raw, argv=None):
     return {"old": as_text("old"), "new": as_text("new"), "reason": as_text("reason"),
             "badge": as_text("badge"), "more": as_text("more"), "alts": alts[:MAX_CHIPS],
             "api": as_text("api").rstrip("/"), "sentence": as_text("sentence")}
+
+
+def clamp(x, y, w, h, monitors):
+    """Keep the card on the monitor the caret is on; edge carets happen constantly.
+
+    monitors is a list of (x, y, width, height) so this is testable without a display.
+    """
+    for mx, my, mw, mh in monitors:
+        if mx <= x < mx + mw and my <= y < my + mh:
+            return (min(max(x, mx), mx + mw - w), min(max(y, my), my + mh - h))
+    if monitors:
+        # Nothing contains it, which happens for real: a caret can report a negative or
+        # beyond-the-edge position (a window partly off-screen, a stale AT-SPI rect). Park the card
+        # on the *nearest* monitor and pull it inside, rather than always on the last one —
+        # measured: an off-the-top-left caret put the card at 3056,936, the far corner of the other
+        # monitor, which is the one place a card is least useful.
+        def centre_distance(m):
+            mx, my, mw, mh = m
+            return (x - (mx + mw / 2)) ** 2 + (y - (my + mh / 2)) ** 2
+        mx, my, mw, mh = min(monitors, key=centre_distance)
+        return (min(max(x, mx), mx + mw - w), min(max(y, my), my + mh - h))
+    return (x, y)
 
 
 def rephrase_body(sentence, tone="", intent=""):
@@ -167,64 +175,73 @@ def post_json(url, body, timeout=REPHRASE_TIMEOUT):
         return 0, {"message": "cannot reach the engine at %s (%s)" % (url, exc)}
 
 
-def card_markup(old, new, reason="", badge="", more="", chips=False):
-    """The card's text as Pango markup. Pure, so it is testable without a display.
-
-    Everything from the document goes through escape(): the text reaches us from the user's own
-    writing via the engine, so it can contain '&' or '<'. Pango would otherwise reject the label
-    outright, or render the document's text as markup — the same trust boundary as esc() in the
-    web UI, where an unescaped engine message broke out of an attribute.
-    """
-    parts = []
-    if chips:
-        # The alternatives are the buttons now, so the headline is just the offender — repeating
-        # the first one as "old → new" would show the same fix twice. Large and bold because it is
-        # the problem the card exists for, and as plain grey it was the faintest thing on it.
-        if old:
-            parts.append('<span size="large" weight="bold"><s>%s</s></span>' % escape(old))
-    elif old and new:
-        parts.append("<s>%s</s>  →  <b>%s</b>" % (escape(old), escape(new)))
-    elif new:
-        parts.append("<b>%s</b>" % escape(new))
-    elif old:
-        parts.append("<s>%s</s>" % escape(old))
-    if reason:
-        parts.append('<span size="small">%s</span>' % escape(reason))
-    if more:
-        parts.append('<span size="small">%s</span>' % escape(more))
-    if badge:
-        parts.append('<span size="small" alpha="55%%">%s</span>' % escape(badge))
-    return "\n".join(parts)
-
-
-def clamp(x, y, w, h, monitors):
-    """Keep the card on the monitor the caret is on; edge carets happen constantly.
-
-    monitors is a list of (x, y, width, height) so this is testable without a display.
-    """
-    for mx, my, mw, mh in monitors:
-        if mx <= x < mx + mw and my <= y < my + mh:
-            return (min(max(x, mx), mx + mw - w), min(max(y, my), my + mh - h))
-    if monitors:
-        # Nothing contains it, which happens for real: a caret can report a negative or
-        # beyond-the-edge position (a window partly off-screen, a stale AT-SPI rect). Park the
-        # card on the *nearest* monitor and pull it inside, rather than always on the last one —
-        # measured: an off-the-top-left caret put the card at 3056,936, the far corner of the
-        # other monitor, which is the one place a card is least useful.
-        def centre_distance(m):
-            mx, my, mw, mh = m
-            return (x - (mx + mw / 2)) ** 2 + (y - (my + mh / 2)) ** 2
-        mx, my, mw, mh = min(monitors, key=centre_distance)
-        return (min(max(x, mx), mx + mw - w), min(max(y, my), my + mh - h))
-    return (x, y)
-
-
 def action_json(action, text=""):
     """One line the watcher can parse. Pure, and the whole output contract."""
     out = {"action": action}
     if text:
         out["text"] = text
     return json.dumps(out, ensure_ascii=False)
+
+
+def card_colors(dark):
+    """The card's palette. Pure: the host decides light or dark from the desktop, and this decides
+    what that means. Keeping the colours here rather than in the QML is what makes them testable."""
+    if dark:
+        return {"surface": "#1a1f26", "chip": "#242b34", "hover": "#2c343e",
+                "border": "#2f3844", "text": "#e7eaee", "muted": "#9aa4b2", "faint": "#6f7a88",
+                "accent": "#e8ebef", "accentInk": "#11151a", "accentHover": "#ffffff"}
+    return {"surface": "#ffffff", "chip": "#f4f5f7", "hover": "#eef0f3",
+            "border": "#e2e5ea", "text": "#14181d", "muted": "#5a6472", "faint": "#8a93a0",
+            "accent": "#1c2127", "accentInk": "#ffffff", "accentHover": "#2c333b"}
+
+
+# ---- the host -----------------------------------------------------------------------------------
+
+try:
+    from PySide6.QtCore import QObject, Qt, QTimer, Slot, QUrl          # noqa: F401
+    from PySide6.QtGui import QGuiApplication, QPalette
+    from PySide6.QtQml import QQmlApplicationEngine
+except Exception as exc:  # noqa: BLE001 - any failure here means "use a notification"
+    print("no pop-up: %s" % exc, file=sys.stderr)
+    sys.exit(2)
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+QML = os.path.join(HERE, "grammar-card.qml")
+
+
+class Bridge(QObject):
+    """What the QML may call: answer, or ask the model. The network stays on this side."""
+
+    def __init__(self, window, payload, app):
+        super().__init__()
+        self.window = window
+        self.payload = payload
+        self.app = app
+        self.chosen = {"action": "", "text": ""}
+
+    @Slot(str, str)
+    def choose(self, action, text):
+        self.chosen = {"action": action, "text": text}
+        self.app.quit()
+
+    @Slot(int, int)
+    def rephrase(self, tone_index, intent_index):
+        tone = TONES[tone_index] if 0 <= tone_index < len(TONES) else ""
+        intent = INTENTS[intent_index] if 0 <= intent_index < len(INTENTS) else ""
+        threading.Thread(target=self._work, args=(tone, intent), daemon=True).start()
+
+    def _work(self, tone, intent):
+        """Off the UI thread; back on it through the window's own properties, which the QML is
+        already bound to. A frozen card is worse than no card."""
+        code, response = post_json(self.payload["api"] + "/v2/rewrite",
+                                   rephrase_body(self.payload["sentence"], tone, intent))
+        candidates = candidates_from(response)
+        if candidates:
+            self.window.setProperty("candidates", candidates)
+            self.window.setProperty("status", "")
+        else:
+            self.window.setProperty("status", api_error_message(response, code))
+        self.window.setProperty("busy", False)
 
 
 def main():
@@ -243,195 +260,50 @@ def main():
         except (OSError, UnicodeDecodeError):
             raw = ""
     payload = parse_payload(raw, args)
-    chosen = {"action": "", "text": ""}
 
-    win = Gtk.Window(type=Gtk.WindowType.TOPLEVEL)
-    win.set_decorated(False)
-    win.set_keep_above(True)
-    win.set_accept_focus(False)   # keep typing in the app: never steal the caret
-    win.set_skip_taskbar_hint(True)
-    win.set_skip_pager_hint(True)
-    win.set_resizable(False)
-    win.set_type_hint(Gdk.WindowTypeHint.POPUP_MENU)
-    win.set_title("grammar")
-    win.connect("destroy", lambda *_: Gtk.main_quit())
+    app = QGuiApplication(sys.argv[:1])
+    # The desktop's own scheme, not a hardcoded one: light or dark comes from the platform palette,
+    # and what those mean comes from card_colors(), which is where the colours can be tested.
+    colors = card_colors(app.palette().color(QPalette.ColorRole.Window).lightness() < 128)
 
-    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-    box.set_border_width(14)
-    chips = len(payload["alts"]) > 1
-    text = Gtk.Label()
-    text.set_markup(card_markup(payload["old"], payload["new"], payload["reason"],
-                                payload["badge"], payload["more"], chips=chips))
-    text.set_xalign(0)
-    text.set_line_wrap(True)
-    text.set_max_width_chars(38)          # about 290 px, the width the design asks for
-    text.set_selectable(False)
-    box.pack_start(text, False, False, 0)
+    engine = QQmlApplicationEngine()
+    engine.load(QUrl.fromLocalFile(QML))
+    roots = engine.rootObjects()
+    if not roots:
+        # Qt has already printed the QML error. Say it in the watcher's terms, and fall back.
+        print("no pop-up: the card failed to load", file=sys.stderr)
+        return 2
+    window = roots[0]
+    window.setProperty("payload", payload)
+    window.setProperty("colors", colors)
 
-    def pick(action, value=""):
-        def handler(*_):
-            chosen["action"], chosen["text"] = action, value
-            Gtk.main_quit()
-        return handler
-
-    def section(label):
-        """A faint section label over a hairline rule.
-
-        The first version was one flat column, so nothing said where the fixes ended and the
-        actions began — the parts were all there and the card still read as a wall.
-        """
-        box.pack_start(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL), False, False, 2)
-        cap = Gtk.Label()
-        cap.set_markup('<span size="small" weight="bold" alpha="55%%">%s</span>' % escape(label))
-        cap.set_xalign(0)
-        box.pack_start(cap, False, False, 0)
-
-    if chips:
-        # One chip per replacement, wrapping. The engine returns them best-first, so the first
-        # wears the primary style: which fix is being offered should be visible, not inferred.
-        section("FIXES")
-        flow = Gtk.FlowBox()
-        flow.set_selection_mode(Gtk.SelectionMode.NONE)
-        flow.set_max_children_per_line(4)
-        flow.set_min_children_per_line(1)
-        flow.set_row_spacing(6)
-        flow.set_column_spacing(6)
-        for i, alt in enumerate(payload["alts"]):
-            chip = Gtk.Button(label=alt)
-            if i == 0:
-                chip.get_style_context().add_class("suggested-action")
-            chip.connect("clicked", pick("replace", alt))
-            flow.add(chip)
-        box.pack_start(flow, False, False, 0)
-
-    status = Gtk.Label()
-    status.set_xalign(0)
-    status.set_line_wrap(True)
-    status.set_max_width_chars(38)
-    status.set_selectable(False)
-
-    row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-    for action, label, primary in (("sentence", "Fix sentence", True),
-                                   ("copy", "Copy", False),
-                                   ("", "Ignore", False)):
-        button = Gtk.Button(label=label)
-        if primary:
-            # GTK's own "this is the primary action" class, so Breeze and Adwaita both style it.
-            button.get_style_context().add_class("suggested-action")
-        button.connect("clicked", pick(action, ""))
-        row.pack_end(button, False, False, 0)
-    box.pack_start(row, False, False, 0)
-
-    # The model's lines land here, directly under their own heading, so the card says what they
-    # are instead of showing three unexplained sentences.
-    ai_slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-
-    # The model lives here now, not in a browser. Rephrase needs an engine URL and the sentence it
-    # is rephrasing; without both the section is not offered at all, rather than offered broken.
-    if payload["api"] and payload["sentence"]:
-        section("REPHRASE")
-        box.pack_start(ai_slot, False, False, 0)
-        airow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        tone = Gtk.ComboBoxText()
-        for value in TONES:
-            tone.append(value, "tone: " + (value or "as-is"))
-        tone.set_active(0)
-        tone.set_size_request(124, -1)     # the combos used to be the widest thing on the card
-        intent = Gtk.ComboBoxText()
-        for value in INTENTS:
-            intent.append(value, value or "rephrase as-is")
-        intent.set_active(0)
-        intent.set_size_request(146, -1)
-        rephrase = Gtk.Button(label="Rephrase")
-
-        def render_candidates(candidates, message):
-            """Back on the main loop: the alternatives appear under their own heading, as flat
-            rows. A bordered button on every line would shout as loudly as the fixes, and a fix
-            is the more likely answer — but flat rows still need the heading, or three
-            unexplained sentences appear in the middle of the card."""
-            status.set_markup("")
-            rephrase.set_sensitive(True)
-            for child in ai_slot.get_children():
-                ai_slot.remove(child)
-            if message:
-                status.set_markup('<span size="small">%s</span>' % escape(message))
-                return False
-            for candidate in candidates:
-                chip = Gtk.Button(label=candidate)
-                chip.set_relief(Gtk.ReliefStyle.NONE)
-                chip.set_halign(Gtk.Align.START)
-                # A rephrase replaces the whole sentence, so the answer is a sentence action
-                # carrying its own text — the watcher applies answer["text"] when it is there.
-                chip.connect("clicked", pick("sentence", candidate))
-                ai_slot.pack_start(chip, False, False, 0)
-            win.show_all()
-            return False
-
-        def worker(sentence, tone_value, intent_value, url):
-            """Off the main loop: the call, then back on it. GLib is not thread-safe, and this is
-            the only way a local model's few seconds do not freeze the card."""
-            status_code, response = post_json(url + "/v2/rewrite",
-                                              rephrase_body(sentence, tone_value, intent_value))
-            candidates = candidates_from(response)
-            if candidates:
-                GLib.idle_add(render_candidates, candidates, "")
-            else:
-                GLib.idle_add(render_candidates, [], api_error_message(response, status_code))
-
-        def on_rephrase(*_):
-            rephrase.set_sensitive(False)
-            status.set_markup('<span size="small">Rephrasing… a local model takes a few '
-                              'seconds</span>')
-            threading.Thread(target=worker, daemon=True,
-                             args=(payload["sentence"], tone.get_active_id() or "",
-                                   intent.get_active_id() or "", payload["api"])).start()
-
-        rephrase.connect("clicked", on_rephrase)
-        airow.pack_start(tone, False, False, 0)
-        airow.pack_start(intent, False, False, 0)
-        airow.pack_end(rephrase, False, False, 0)
-        box.pack_start(airow, False, False, 0)
-        box.pack_start(status, False, False, 0)
-
-    win.add(box)
-    win.show_all()
+    bridge = Bridge(window, payload, app)
+    engine.rootContext().setContextProperty("bridge", bridge)
 
     if opts["x"] is not None and opts["y"] is not None:
-        display = Gdk.Display.get_default()
-        monitors = []
-        if display is not None:
-            for i in range(display.get_n_monitors()):
-                geo = display.get_monitor(i).get_geometry()
-                monitors.append((geo.x, geo.y, geo.width, geo.height))
-        alloc = win.get_allocation()
-        px, py = clamp(int(opts["x"]), int(opts["y"]), alloc.width, alloc.height, monitors)
-        win.move(px, py)
-        # Reported, not assumed, and from the X server rather than GDK: under XWayland
-        # get_position() still says 0 0 after a successful move (measured), while the X server
-        # agrees with the request. A test that trusted get_position() would report every card as
-        # misplaced.
-        def report_placed():
-            """Report after the geometry settles.
+        def place():
+            """Position once the layout has settled, from the platform's own screen list.
 
-            Read immediately after move(), both get_position() and get_root_coords() return 0 0 —
-            they reflect what the server has confirmed, and it has not confirmed yet. Measured:
-            the X server already agrees with the request (xdotool shows Position: 900,300) while
-            GDK still says 0 0 in the same instant.
+            Read too early, width and height are still zero and the clamp would park the card in a
+            corner. What the server did is then reported, so a test compares the request with the
+            real position instead of with what we hoped for.
             """
-            try:
-                root = win.get_window().get_root_coords(0, 0)
-                print("PLACED %d %d (asked %s %s)" % (root[0], root[1], opts["x"], opts["y"]),
-                      file=sys.stderr, flush=True)
-            except Exception as exc:
-                print("PLACED unknown (%s)" % exc, file=sys.stderr, flush=True)
-            return False
+            monitors = [(s.geometry().x(), s.geometry().y(),
+                         s.geometry().width(), s.geometry().height()) for s in app.screens()]
+            x, y = clamp(int(opts["x"]), int(opts["y"]), window.width(), window.height(), monitors)
+            window.setPosition(x, y)
+            # The size is reported with the position: a card that maps at 1x1 and positions "fine"
+            # is the failure this line exists to make visible, and it happened here once.
+            print("PLACED %d %d (asked %s %s) size %dx%d"
+                  % (window.x(), window.y(), opts["x"], opts["y"], window.width(), window.height()),
+                  file=sys.stderr, flush=True)
+        QTimer.singleShot(40, place)
 
-        GLib.timeout_add(400, report_placed)
+    QTimer.singleShot(timeout * 1000, app.quit)
+    app.exec()
 
-    GLib.timeout_add_seconds(timeout, lambda: (Gtk.main_quit(), False)[1])
-    Gtk.main()
-    if chosen["action"]:
-        print(action_json(chosen["action"], chosen["text"]), flush=True)
+    if bridge.chosen["action"]:
+        print(action_json(bridge.chosen["action"], bridge.chosen["text"]), flush=True)
     return 0
 
 
