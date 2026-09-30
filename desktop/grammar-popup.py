@@ -51,7 +51,6 @@ test can tell placement from luck.
 
 import json
 import os
-import subprocess
 import sys
 import threading
 import urllib.error
@@ -94,48 +93,53 @@ except Exception as exc:  # noqa: BLE001 - any failure here means "use a notific
 HERE = os.path.dirname(os.path.abspath(__file__))
 QML = os.path.join(HERE, "grammar-card.qml")
 
-# The two window classes. A card is a popup — override-redirect so the compositor cannot move or
-# decorate it, and it never takes focus so the caret stays where the user is typing. The settings
-# panel is a window you work in: decorated by the compositor (drag/minimise/maximise for free) and
-# it takes focus, which is what typing an address, a model name or an API key requires.
+# Two flag sets, one window at a time. The finding card's is the safe one: override-redirect (so the
+# position is ours to set) and no input focus (so the caret stays in the application being typed in —
+# WM_HINTS reports "Client accepts input or input focus: False" there, which is the authoritative
+# witness: _NET_ACTIVE_WINDOW and `xdotool getwindowfocus` report the card either way and mean
+# nothing here).
 CARD_FLAGS = (Qt.FramelessWindowHint | Qt.X11BypassWindowManagerHint | Qt.WindowStaysOnTopHint
               | Qt.WindowDoesNotAcceptFocus | Qt.Tool)
-PANEL_FLAGS = (Qt.Window | Qt.WindowTitleHint | Qt.WindowSystemMenuHint | Qt.WindowMinMaxButtonsHint
-               | Qt.WindowCloseButtonHint)
+# The panel's: the same window *without* the input restriction, because typing an address, a model
+# name or an API key is most of what the panel is for. It is still override-redirect — that is the
+# only class that renders on this stack.
+PANEL_FLAGS = (Qt.FramelessWindowHint | Qt.X11BypassWindowManagerHint | Qt.WindowStaysOnTopHint
+               | Qt.Tool)
 
 
-def choose_platform(as_window):
-    """Which Qt platform plugin, and the only place that is decided.
+def choose_platform(_in_settings=False):
+    """The Qt platform: the X path, unless someone pinned one.
 
-    The card is placed at the caret from the accessibility bus's coordinates, and Wayland does not
-    tell a client where another application is — so the card keeps the X path, where the X server
-    will honour a position (XWayland on a Wayland session, a real X server otherwise).
-
-    The settings panel is not positioned by us at all, so it takes the native platform and lets the
-    compositor place, decorate and move it. That is also what makes it render: on XWayland a
-    decorated Qt window here showed its background and none of its content.
-
-    An explicit QT_QPA_PLATFORM always wins, so a user or a test can still pin one.
+    The card is placed at the caret from accessibility coordinates, and Wayland does not tell a
+    client where another application is — so the UI runs on X (XWayland on a Wayland session, a real
+    X server otherwise). The panel is this same window, so it shares the platform; a native-Wayland
+    panel would be a second window in a second process, which is what "one UI" rules out.
     """
-    pinned = os.environ.get("QT_QPA_PLATFORM")
-    if pinned:
-        return pinned
-    if as_window and os.environ.get("WAYLAND_DISPLAY"):
-        return "wayland"
-    return "xcb"
+    return os.environ.get("QT_QPA_PLATFORM") or "xcb"
 
 
-def apply_window_class(window, as_window):
-    """The one place the window's class is decided, and the only place that changes it.
+def apply_view(window, in_settings):
+    """The one place the view, and with it the window's flags, are decided.
 
-    Called before exec(), so nothing is ever painted as the wrong kind of window. It is a call
-    rather than a QML `flags:` binding because a binding here would be overwritten by it; and each
-    process is exactly one of the two surfaces (the card's "AI runner" link opens a new process
-    rather than switching in place — see Bridge.openSettings).
+    Flags have to change with the view and they cannot be a QML binding (the host assigns them), and
+    changing flags on X recreates the native window. A recreate of a *visible* window paints nothing
+    afterwards — measured twice: right size, right pid, empty client area — so the change is made
+    with the window off screen and it is shown again on the other side, which is the state it starts
+    in and the one that renders.
     """
-    window.setProperty("asWindow", as_window)
-    window.setProperty("view", "settings" if as_window else "finding")
-    window.setFlags(PANEL_FLAGS if as_window else CARD_FLAGS)
+    window.setProperty("view", "settings" if in_settings else "finding")
+    flags = PANEL_FLAGS if in_settings else CARD_FLAGS
+    if window.flags() != flags:
+        was_visible = window.isVisible()
+        was_at = (window.x(), window.y())
+        window.setVisible(False)
+        window.setFlags(flags)
+        window.setPosition(was_at[0], was_at[1])
+        window.setVisible(was_visible)
+    if in_settings:
+        # The panel wants the keyboard; the finding view must not have it, which is why the flag
+        # above goes back on when this function is called with False.
+        window.requestActivate()
 
 
 class Bridge(QObject):
@@ -156,20 +160,25 @@ class Bridge(QObject):
 
     @Slot()
     def openSettings(self):
-        """The card's way in: a *new* process opens the panel, then the card goes away.
+        """Switch this window to the panel, in place — one UI, one window, one process.
 
-        Not the card turning into a panel in place: the panel wants the native platform (the card
-        holds the X path so it can be placed at the caret) and one Qt process has one platform. A
-        separate process also means a panel that dies cannot take the card down with it, which is
-        the same reason the card is its own process.
+        The panel needs the keyboard and the finding view must not have it, so the flags change with
+        the view; see apply_view for why that happens off screen. The ✕ in the panel's own titlebar
+        and Escape both come back through choose("", "").
         """
-        env = dict(os.environ)
-        env.pop("QT_QPA_PLATFORM", None)      # let the child choose for itself: wayland for a panel
-        subprocess.Popen(
-            [sys.executable, os.path.abspath(__file__), "--settings", "--api", self.api_base],
-            env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-            start_new_session=True)
-        self.app.quit()
+        apply_view(self.window, True)
+        self.window.setProperty("status", "")
+        self.loadSettings()
+
+    @Slot(float, float)
+    def dragWindow(self, dx, dy):
+        """Move the window by a delta — ours to do, because nothing manages this window.
+
+        The panel is override-redirect (see apply_view), so there is no window manager to drag it;
+        the titlebar MouseArea sends deltas here instead. This is the same authority that puts the
+        card at the caret.
+        """
+        self.window.setPosition(self.window.x() + int(dx), self.window.y() + int(dy))
 
     @Slot(int, int)
     def rephrase(self, tone_index, intent_index):
@@ -285,8 +294,8 @@ def main():
     api_base = payload["api"] or opts["api"] or DEFAULT_API
     window.setProperty("payload", payload)
     window.setProperty("colors", colors)
-    # sets asWindow, the view and the flags: a card is a popup, --settings is a window.
-    apply_window_class(window, settings_mode)
+    # sets the view and its flags: the finding view is the card, the panel is that same window.
+    apply_view(window, settings_mode)
 
     bridge = Bridge(window, payload, app, api_base)
     engine.rootContext().setContextProperty("bridge", bridge)
@@ -314,17 +323,12 @@ def main():
                 g = app.primaryScreen().geometry()
                 x = g.x() + (g.width() - window.width()) // 2
                 y = g.y() + (g.height() - window.height()) // 2
-            # A Wayland compositor places its own windows and ignores setPosition, so don't ask:
-            # the numbers printed below are then the compositor's answer, not a request we made.
-            if os.environ.get("QT_QPA_PLATFORM") != "wayland":
-                window.setPosition(x, y)
-            # A Wayland compositor places its own windows and ignores setPosition, and a Wayland
-            # client is never told where it ended up — so the position is left out of the line
-            # rather than reported as 0 0, which reads like a bug. The size still matters: a card
-            # that maps at 1x1 is the failure this line exists to make visible.
-            placed = "PLACED (the compositor places it)" if os.environ.get("QT_QPA_PLATFORM") == "wayland" \
-                     else "PLACED %d %d (asked %s)" % (window.x(), window.y(), asked)
-            print("%s size %dx%d" % (placed, window.width(), window.height()),
+            # The position is ours to set: the window is override-redirect, which is also why the
+            # panel has its own drag. The size is reported with it — a card that maps at 1x1 and
+            # positions "fine" is the failure this line exists to make visible.
+            window.setPosition(x, y)
+            print("PLACED %d %d (asked %s) size %dx%d"
+                  % (window.x(), window.y(), asked, window.width(), window.height()),
                   file=sys.stderr, flush=True)
         # The settings panel's height arrives with its state, a round trip later, so it is measured
         # after that rather than at the finding card's 40 ms.

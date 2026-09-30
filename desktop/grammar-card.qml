@@ -26,26 +26,17 @@ import QtQuick.Layouts
 
 Window {
     id: card
-    // Two window classes, and the host owns them: `apply_window_class` in grammar-popup.py decides
-    // between them, once per process. Deliberately *not* a `flags:` binding — the host sets the
-    // class as a call, and a binding would be overwritten by it.
-    //
-    // The *card* is a popup: BypassWindowManagerHint is what makes the position ours (the
-    // compositor neither moves nor decorates it — the same thing the GTK card asked for with a
-    // POPUP_MENU hint), and WindowDoesNotAcceptFocus keeps the caret in the app while you type.
-    //
-    // The *settings panel* is a window you work in: it takes focus (typing an address, a model name
-    // or an API key is most of what it is for) and the compositor decorates it, so dragging,
-    // minimising and maximising come for free. It carried the card's flags until someone tried to
-    // move it (reported: "i cannot drag window or minimise or maximise").
-    title: card.asWindow ? "AI runner — grammar" : ""
-    color: card.asWindow ? card.c("surface", "#ffffff") : "transparent"
+    // One window, two views: the finding at the caret turns into the AI-runner panel in place
+    // (`view`), which is what "one UI" means here — no second window, no second process. The class
+    // is therefore the card's, always: override-redirect, frameless, on top. That is also the only
+    // class that renders on this stack — a compositor-managed window paints its background and none
+    // of its content under XWayland (measured with decorations and without, layer on and off, flags
+    // from QML and from the host). The panel's own titlebar below is the compensation: a compositor
+    // will not move a window it does not manage, so the drag is ours.
+    color: "transparent"
     visible: false
     width: surface.width
     height: surface.height
-
-    // Set by the host: true only for --settings, i.e. the panel above rather than the card.
-    property bool asWindow: false
 
     property var payload: ({})       // what the watcher sent
     property var colors: ({})        // from the desktop's palette, via the host
@@ -66,7 +57,7 @@ Window {
     // and the only one it has now that it is a real window. Disabled for the card, which never
     // takes focus and therefore has no keys to miss: Enter and Escape do nothing there by design.
     Shortcut {
-        enabled: card.asWindow
+        enabled: card.view === "settings"
         // Spelled out rather than StandardKey.Cancel, which maps several bindings (Qt warns that
         // only one of them is used): Escape is the one a panel is expected to answer.
         sequence: "Escape"
@@ -74,6 +65,11 @@ Window {
     }
 
     function c(name, fallback) { return colors && colors[name] ? colors[name] : fallback }
+
+    // Move the window by a delta. The claim on the position is the same one that puts the card at
+    // the caret, and it is why the panel can be dragged at all: an override-redirect window is the
+    // host's to place, so the titlebar MouseArea asks for this instead of the compositor.
+    function dragBy(dx, dy) { bridge.dragWindow(dx, dy) }
     // The settings state is another process's JSON: every read needs a fallback.
     function s(name, fallback) {
         return settings && settings[name] !== undefined ? settings[name] : fallback
@@ -95,7 +91,7 @@ Window {
         id: surface
         x: 0
         y: 0
-        radius: card.asWindow ? 0 : 12
+        radius: 12
         color: card.c("surface", "#ffffff")
         border.width: 1
         border.color: card.c("border", "#e2e5ea")
@@ -105,13 +101,11 @@ Window {
         implicitWidth: 436
         implicitHeight: (card.view === "settings" ? settingsPanel.implicitHeight
                                                   : findingPanel.implicitHeight) + 28
-        // The shadow is the card's, not the window's: a decorated window already has a frame, and
-        // an inner drop shadow under a titlebar looks like a mistake. The layer itself stays on —
-        // disabling it (tried first) left the client area painting nothing at all, which read as a
-        // transparent window with a titlebar on it.
+        // The layer stays on for both views: it is what the card's shadow and rounded corners are
+        // drawn with, and the card is the class both views use.
         layer.enabled: true
         layer.effect: MultiEffect {
-            shadowEnabled: !card.asWindow
+            shadowEnabled: true
             shadowBlur: 0.7
             shadowVerticalOffset: 4
             shadowColor: "#40000000"
@@ -146,8 +140,8 @@ Window {
                 }
                 // The way in to the settings. The card is where the checking happens, so it is
                 // where the backend is chosen; after the browser UI was removed there is no other
-                // surface at all. It opens a *separate process* as a real window — see
-                // openSettings — because the panel is worked in, not glanced at.
+                // surface at all. It switches *this* window to the panel in place — one UI, one
+                // window, one process — and the ✕ in the panel's titlebar or Escape comes back.
                 Act {
                     flat: true
                     text: "AI runner"
@@ -275,43 +269,89 @@ Window {
             visible: card.view === "settings"
 
             // ---- header: what this is, and how it is doing ----------------------------------
-            RowLayout {
+            // This row is the panel's titlebar, because the window is override-redirect: a
+            // compositor will not move a window it does not manage, so dragging is ours and the
+            // close is ours. A glyph would be one font away from tofu, so the ✕ is drawn.
+            Item {
                 width: parent.width
-                spacing: 8
-                Text {
-                    Layout.fillWidth: true
-                    text: "AI runner"
-                    font.pixelSize: 17
-                    font.weight: Font.DemiBold
-                    color: card.c("text", "#14181d")
+                implicitHeight: headerRow.implicitHeight
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.SizeAllCursor
+                    // Incremental, not from the press point: passing the total delta to a
+                    // position-setting move would apply it again on every event and run away.
+                    property point from: Qt.point(0, 0)
+                    onPressed: from = Qt.point(mouse.x, mouse.y)
+                    onPositionChanged: {
+                        card.dragBy(mouse.x - from.x, mouse.y - from.y)
+                        from = Qt.point(mouse.x, mouse.y)
+                    }
                 }
-                // A dot and one word, so the state reads at a glance instead of being buried in a
-                // sentence. The sentence is still there, under the buttons.
-                Row {
-                    spacing: 6
-                    Rectangle {
-                        width: 7
-                        height: 7
-                        radius: 3.5
-                        anchors.verticalCenter: parent.verticalCenter
-                        color: {
-                            var t = card.s("tone", "idle")
-                            if (t === "good") return "#2f9e57"
-                            if (t === "warn") return "#d9822b"
-                            if (t === "bad") return "#cf4b3f"
-                            return card.c("faint", "#8a93a0")
+                RowLayout {
+                    id: headerRow
+                    anchors.fill: parent
+                    spacing: 8
+                    Text {
+                        Layout.fillWidth: true
+                        text: "AI runner"
+                        font.pixelSize: 17
+                        font.weight: Font.DemiBold
+                        color: card.c("text", "#14181d")
+                    }
+                    // A dot and one word, so the state reads at a glance instead of being buried in
+                    // a sentence. The sentence is still there, under the buttons.
+                    Row {
+                        spacing: 6
+                        Rectangle {
+                            width: 7
+                            height: 7
+                            radius: 3.5
+                            anchors.verticalCenter: parent.verticalCenter
+                            color: {
+                                var t = card.s("tone", "idle")
+                                if (t === "good") return "#2f9e57"
+                                if (t === "warn") return "#d9822b"
+                                if (t === "bad") return "#cf4b3f"
+                                return card.c("faint", "#8a93a0")
+                            }
+                        }
+                        Text {
+                            text: {
+                                var t = card.s("tone", "idle")
+                                if (t === "good") return "working"
+                                if (t === "warn") return "unverified"
+                                if (t === "bad") return "not answering"
+                                return "off"
+                            }
+                            font.pixelSize: 12
+                            color: card.c("muted", "#5a6472")
                         }
                     }
-                    Text {
-                        text: {
-                            var t = card.s("tone", "idle")
-                            if (t === "good") return "working"
-                            if (t === "warn") return "unverified"
-                            if (t === "bad") return "not answering"
-                            return "off"
+                    Act {
+                        flat: true
+                        implicitWidth: 26
+                        // "Close panel" is the accessible name, not something drawn: the contentItem
+                        // below is the vector ✕. Distinct from the footer's "Close" so both are
+                        // findable — a button with no name is a button no test can press.
+                        text: "Close panel"
+                        Accessible.description: "Close the AI runner panel"
+                        onClicked: bridge.choose("", "")
+                        contentItem: Item {
+                            Rectangle {
+                                width: 11
+                                height: 1.5
+                                rotation: 45
+                                anchors.centerIn: parent
+                                color: card.c("muted", "#5a6472")
+                            }
+                            Rectangle {
+                                width: 11
+                                height: 1.5
+                                rotation: -45
+                                anchors.centerIn: parent
+                                color: card.c("muted", "#5a6472")
+                            }
                         }
-                        font.pixelSize: 12
-                        color: card.c("muted", "#5a6472")
                     }
                 }
             }
