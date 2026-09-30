@@ -108,9 +108,33 @@ def test_it_can_pass():
         ok("FAIL" in out or "warn" in out, "and a broken one says which part")
 
 
+def test_install_check(doctor):
+    """The install check has to notice the module the clients import.
+
+    An install predating the grammar_core split has three binaries that look fine and die on
+    startup with an ImportError — the silent breakage this command exists for. Proved by pointing
+    the check at a directory with nothing in it, because a check that cannot fail is decoration.
+    """
+    essential, okd, detail, fix = doctor.check_install("/nonexistent-bindir-for-test")
+    ok(essential is True, "the installed files are an essential part of the chain")
+    ok(okd is False, "a directory with nothing in it fails the check")
+    ok("grammar_core.py" in detail, "and the report names the module: %r" % detail)
+    ok("make install" in fix, "with the fix, not just the finding: %r" % fix)
+    # On the machine running the tests, the module and the card file sit where the clients look
+    # for them. Skipped where nothing is installed, which is how CI runs.
+    state = doctor.check_install()
+    if state[1]:
+        ok(all(os.path.exists(os.path.join(doctor.BINDIR, name))
+               for name in ("grammar_core.py", "grammar-card.qml")),
+           "this install has the module and the card file beside the scripts")
+    else:
+        print("  install: nothing installed here — the file list is asserted above")
+
+
 def main():
     doctor = load()
     test_verdict(doctor)
+    test_install_check(doctor)
     test_it_can_fail()
     test_it_can_pass()
     print("grammar-doctor: %d assertions - %s" % (PASS + FAIL, "passed" if not FAIL else "FAILED"))

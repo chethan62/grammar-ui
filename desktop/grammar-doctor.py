@@ -45,6 +45,12 @@ BINDIR = os.path.expanduser("~/.local/bin")
 APPDIR = os.path.expanduser("~/.local/share/applications")
 TIMEOUT = 6
 
+# The clients' headless half, for the one thing this script needs from it: where the engine is by
+# default. One source for that value rather than a second literal. The path insert is needed
+# because this file gets run by path as often as it is run installed.
+sys.path.insert(0, HERE)
+from grammar_core import DEFAULT_API  # noqa: E402
+
 # The one sentence this project has measured the engine against all along. Proved to be flagged
 # (HE_VERB_AGR + UPPERCASE_SENTENCE_START) while "This sentence have an error." is not — the
 # engine's agreement coverage has a hole, so the sample has to be one that is known to work.
@@ -86,7 +92,7 @@ def api_base():
             base = getattr(module, "API", "")
             if base:
                 return base.rstrip("/")
-    return (os.environ.get("GRAMMAR_API") or "http://127.0.0.1:8875").rstrip("/")
+    return DEFAULT_API.rstrip("/")
 
 
 def verdict(rows):
@@ -100,14 +106,23 @@ def verdict(rows):
 # ---- the checks -------------------------------------------------------------------------------
 # Each returns (essential, ok, detail, fix). `fix` is empty when nothing needs doing.
 
-def check_install():
-    missing = [name for name in ("grammar-lookup", "grammar-watch", "grammar-popup.py")
-               if not os.path.exists(os.path.join(BINDIR, name))]
+def check_install(bindir=None):
+    """The installed pieces, including the module the clients import and the card's own QML.
+
+    grammar_core.py is not decoration: the watcher and the card both import it, and the card loads
+    grammar-card.qml, so an install that predates either change has binaries that look fine and die
+    on startup. Checking the files an install must have is the cheapest way to catch that — and it
+    is exactly the failure this command exists for.
+    """
+    bindir = bindir or BINDIR
+    wanted = ("grammar-lookup", "grammar-watch", "grammar-popup.py", "grammar-doctor",
+              "grammar_core.py", "grammar-card.qml")
+    missing = [name for name in wanted if not os.path.exists(os.path.join(bindir, name))]
     if missing:
-        return (True, False, "missing from %s: %s" % (BINDIR, ", ".join(missing)),
-                "run `make install` (or `grammar-lookup --help` if it is somewhere else)")
-    # The installed watcher has no .py suffix; the repo's does. Either is fine, one must exist.
-    return (True, True, "grammar-lookup, grammar-watch, grammar-popup.py in %s" % BINDIR, "")
+        return (True, False, "missing from %s: %s" % (bindir, ", ".join(missing)),
+                "run `make install` — the clients import grammar_core.py and the card loads "
+                "grammar-card.qml, so both must sit beside them")
+    return (True, True, "%d installed files, including grammar_core.py" % len(wanted), "")
 
 
 def check_engine(base):
