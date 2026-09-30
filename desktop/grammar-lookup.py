@@ -9,9 +9,8 @@ local engine and shows the findings in a native dialog:
   No      the corrected text is shown (kdialog --textbox), nothing is copied
   Cancel  nothing happens
 
-The corrected text is the same result the web UI's "Fix all" produces: the first
-replacement of every match, applied right to left, skipping matches that overlap one
-already applied.
+The corrected text is every match's first replacement, applied right to left and
+skipping any that overlaps one already applied.
 
 Why the clipboard instead of typing the fix in: KWin does not implement the Wayland
 virtual-keyboard protocol, so wtype cannot synthesise a paste. If a working synthesiser is
@@ -74,9 +73,9 @@ def fixed(text, matches):
         if not m["replacements"]:
             continue
         start, end = m["offset"], m["offset"] + m["length"]
-        # The engine's offsets are over the text just sent, so this should never fire — but
-        # the same out-of-range splice in the web UI ate a sentence today, and the guard is
-        # two lines against corrupting someone's writing.
+        # The engine's offsets are over the text just sent, so this should never fire — but an
+        # out-of-range splice in the deleted browser UI once ate a sentence, and the guard is two
+        # lines against corrupting someone's writing.
         if start < 0 or end > len(text) or start >= end:
             continue
         if any(start < a_end and end > a_start for a_start, a_end in applied):
@@ -91,8 +90,8 @@ def fix_until_stable(text, checker, rounds=4):
 
     The engine's sentence-capitalisation rule suggests "Teh" for a typo at the start of a
     sentence (it is fixing the capital, not the spelling), and only the next pass sees the
-    remaining typo and turns it into "The". The web UI's Fix all repeats for the same
-    reason; this does too, and stops as soon as a pass changes nothing.
+    remaining typo and turns it into "The". That is why this repeats until a pass changes
+    nothing, rather than stopping after one.
     """
     for _ in range(rounds):
         matches = checker(text).get("matches", [])
@@ -155,8 +154,15 @@ def dialog(matches, corrected, text):
     """kdialog is on KDE (zenity elsewhere). Yes copies, No shows the text."""
     tool = "kdialog" if shutil.which("kdialog") else ("zenity" if shutil.which("zenity") else "")
     if not tool:
-        copy(corrected)
-        notify("%d issue(s) fixed" % len(matches), "The corrected text is on your clipboard.")
+        # No dialog tool, so the clipboard is the only way to hand this over — and that has to be
+        # checked. "The corrected text is on your clipboard" when neither wl-copy nor xclip exists
+        # is a claim that leaves the user with nothing, which is worse than a refusal. Same
+        # fallback the Yes branch uses below.
+        if copy(corrected):
+            notify("%d issue(s) fixed" % len(matches), "The corrected text is on your clipboard.")
+        else:
+            print(corrected)
+            notify("Could not write to the clipboard", corrected[:200])
         return
     if not matches:
         subprocess.run([tool, "--msgbox", "No issues found.", "--title", "grammar"], timeout=120)

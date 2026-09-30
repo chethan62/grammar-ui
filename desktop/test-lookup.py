@@ -109,7 +109,28 @@ argv, clip, note = run_dialog(0, [], corrected, "clean")
 assert "--msgbox" in argv, argv
 assert "No issues found" in argv, argv
 assert clip is None
-print("dialog contract: 11 assertions - passed")
+
+# No dialog tool AND no clipboard tool: the one way to hand the fix over is gone, so the
+# notification must not claim the text is on a clipboard that does not exist. PATH is replaced
+# rather than prepended, because a prepended stub dir still finds the real wl-copy on this box —
+# the same mistake as trusting a variable that adds paths to hide a default.
+bare = tempfile.mkdtemp(prefix="lookup-bare-")
+record = tempfile.mktemp(prefix="lookup-bare-rec-")
+with open(os.path.join(bare, "notify-send"), "w") as fh:
+    fh.write('#!/bin/sh\nprintf "%s\\n" "$*" >> ' + record + '.notify\n')
+os.chmod(os.path.join(bare, "notify-send"), 0o755)
+old_path = os.environ.get("PATH", "")
+os.environ["PATH"] = bare
+try:
+    lookup.dialog(matches, corrected, "x")
+finally:
+    os.environ["PATH"] = old_path
+note = open(record + ".notify").read() if os.path.exists(record + ".notify") else ""
+assert "Could not write" in note, "with nothing to copy with, the notification says so: %r" % note
+assert "on your clipboard" not in note, \
+    "and never claims a clipboard that does not exist: %r" % note
+assert corrected[:40] in note, "the text itself is in the message, or there is nothing to use: %r" % note
+print("dialog contract: 14 assertions - passed")
 
 # end to end through the engine, when it is up
 try:
