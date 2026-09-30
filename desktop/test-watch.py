@@ -626,13 +626,21 @@ def test_edit_refusal(module):
             raise RuntimeError("no such interface")
 
     class StubClient:
+        """A client whose clipboard works — as the real one does on a box with wl-clipboard.
+
+        copy() returns whether it worked, so a stub that returns nothing is not modelling the
+        contract: `not None` is true, which quietly sent every successful copy down the
+        could-not-copy path.
+        """
         API = "http://127.0.0.1:8875"
 
         def __init__(self):
             self.copied = []
+            self.copied_ok = True
 
         def copy(self, text):
             self.copied.append(text)
+            return self.copied_ok
 
         def check(self, text):
             return {"matches": []}
@@ -697,6 +705,41 @@ def test_edit_refusal(module):
                   {"old": "teh", "new": "the", "span": [0, 3]}, None)
     ok(client.copied == [] and len(asked) == 1,
        "so a click that works asks the question once and posts no notice: %d call(s)" % len(asked))
+
+    # And the same claim checked one branch over: a Copy that could not be written must say so
+    # rather than leave the user pasting something that is not there.
+    target = Refusing()
+    client = StubClient()
+    client.copied_ok = False
+    asked = []
+    watcher = module.Watcher(client, cooldown=0.0,
+                             ask=lambda issue, pos=None: (asked.append(issue),
+                                                          {"action": "copy"})[1])
+    watcher.target = target
+    watcher.unchanged = lambda *a: True
+    watcher.offer(0, 3, "teh", "the corrected sentence",
+                  {"old": "teh", "new": "the", "span": [0, 3]}, None)
+    ok(client.copied == ["the corrected sentence"], "Copy still tried to write it: %r" % client.copied)
+    ok(asked and asked[-1].get("summary") == "Could not copy",
+       "and says it could not copy, instead of nothing: %r" % (asked[-1] if asked else None))
+
+    # Both wrong at once: the document refuses the edit and there is no clipboard to fall back to.
+    # "Copied instead" would be a lie about the one thing the user is relying on.
+    client = StubClient()
+    client.copied_ok = False
+    asked = []
+    watcher = module.Watcher(client, cooldown=0.0,
+                             ask=lambda issue, pos=None: (asked.append(issue),
+                                                          {"action": "sentence", "text": "the"})[1])
+    watcher.target = Refusing()
+    watcher.unchanged = lambda *a: True
+    watcher.offer(0, 3, "teh", "the corrected sentence",
+                  {"old": "teh", "new": "the", "span": [0, 3]}, None)
+    ok(client.copied == ["the"], "the fallback still tried the clipboard: %r" % client.copied)
+    ok(asked and "no clipboard" in asked[-1].get("reason", ""),
+       "and the notice names the real problem: %r" % (asked[-1] if asked else None))
+    ok(not any("Copied instead" in (i.get("summary") or "") for i in asked),
+       "never claiming copied-instead when nothing was copied")
 
 
 def main():

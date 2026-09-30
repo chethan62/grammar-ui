@@ -452,21 +452,32 @@ class Watcher:
                 text = answer.get("text") or fixed
                 applied = self.replace(start, end, text)
             else:
-                self.client.copy(fixed)
+                # Copy is an outcome too: claiming it worked when no clipboard tool exists leaves
+                # the user with nothing and no way to know. copy() returns whether it worked.
+                if not self.client.copy(fixed):
+                    self.ask({"old": fixed, "new": "",
+                              "reason": "No clipboard tool — install wl-clipboard or xclip",
+                              "summary": "Could not copy", "more": fixed[:200]})
                 return
             if applied is False:
-                # A document that cannot be edited is not a crash and must not be a silence: put the
-                # correction on the clipboard and say what happened. This is the difference between
-                # a click that appears broken and one that still did the useful thing.
+                # The document refused the edit, so the clipboard is the fallback — and whether
+                # that worked decides what to say. Two things can be wrong at once (no editable
+                # text, and no clipboard tool), so the message covers both rather than claiming
+                # "copied" for a copy that did not happen.
                 #
                 # Tested with `is False`, not truthiness: only an explicit refusal means the edit
                 # did not happen, so a replace() that returns nothing (an older implementation, a
                 # stand-in in a test) keeps the behaviour it always had.
-                self.client.copy(text)
-                self.ask({"old": text, "new": "",
-                          "reason": "This document cannot be edited from here",
-                          "summary": "Copied instead",
-                          "more": "Paste it where you need it, or select text and press Ctrl+Alt+C."})
+                if self.client.copy(text):
+                    self.ask({"old": text, "new": "",
+                              "reason": "This document cannot be edited from here",
+                              "summary": "Copied instead",
+                              "more": "Paste it where you need it, or select text and press Ctrl+Alt+C."})
+                else:
+                    self.ask({"old": text, "new": "",
+                              "reason": "This document cannot be edited here, and there is no "
+                                        "clipboard to copy it to (install wl-clipboard or xclip)",
+                              "summary": "Could not apply or copy", "more": text[:200]})
         finally:
             self.busy = False
 
