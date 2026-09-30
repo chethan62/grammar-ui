@@ -26,15 +26,26 @@ import QtQuick.Layouts
 
 Window {
     id: card
-    // BypassWindowManagerHint is what makes the position ours: with it the window is
-    // override-redirect, so the compositor neither moves nor decorates it — the same thing the GTK
-    // card asked for with a POPUP_MENU hint. WindowDoesNotAcceptFocus keeps the caret in the app.
-    flags: Qt.FramelessWindowHint | Qt.X11BypassWindowManagerHint
-           | Qt.WindowStaysOnTopHint | Qt.WindowDoesNotAcceptFocus | Qt.Tool
-    color: "transparent"
+    // Two window classes, and the host owns them: `apply_window_class` in grammar-popup.py decides
+    // between them, once per process. Deliberately *not* a `flags:` binding — the host sets the
+    // class as a call, and a binding would be overwritten by it.
+    //
+    // The *card* is a popup: BypassWindowManagerHint is what makes the position ours (the
+    // compositor neither moves nor decorates it — the same thing the GTK card asked for with a
+    // POPUP_MENU hint), and WindowDoesNotAcceptFocus keeps the caret in the app while you type.
+    //
+    // The *settings panel* is a window you work in: it takes focus (typing an address, a model name
+    // or an API key is most of what it is for) and the compositor decorates it, so dragging,
+    // minimising and maximising come for free. It carried the card's flags until someone tried to
+    // move it (reported: "i cannot drag window or minimise or maximise").
+    title: card.asWindow ? "AI runner — grammar" : ""
+    color: card.asWindow ? card.c("surface", "#ffffff") : "transparent"
     visible: false
     width: surface.width
     height: surface.height
+
+    // Set by the host: true only for --settings, i.e. the panel above rather than the card.
+    property bool asWindow: false
 
     property var payload: ({})       // what the watcher sent
     property var colors: ({})        // from the desktop's palette, via the host
@@ -50,6 +61,17 @@ Window {
     // A request from another machine may not change the backend: the server refuses it, so the
     // panel is read-only rather than offer a button that fails.
     readonly property bool editable: settings.writable !== false
+
+    // Escape closes the panel — the standard gesture for a window you opened to change something,
+    // and the only one it has now that it is a real window. Disabled for the card, which never
+    // takes focus and therefore has no keys to miss: Enter and Escape do nothing there by design.
+    Shortcut {
+        enabled: card.asWindow
+        // Spelled out rather than StandardKey.Cancel, which maps several bindings (Qt warns that
+        // only one of them is used): Escape is the one a panel is expected to answer.
+        sequence: "Escape"
+        onActivated: bridge.choose("", "")
+    }
 
     function c(name, fallback) { return colors && colors[name] ? colors[name] : fallback }
     // The settings state is another process's JSON: every read needs a fallback.
@@ -73,7 +95,7 @@ Window {
         id: surface
         x: 0
         y: 0
-        radius: 12
+        radius: card.asWindow ? 0 : 12
         color: card.c("surface", "#ffffff")
         border.width: 1
         border.color: card.c("border", "#e2e5ea")
@@ -83,9 +105,13 @@ Window {
         implicitWidth: 436
         implicitHeight: (card.view === "settings" ? settingsPanel.implicitHeight
                                                   : findingPanel.implicitHeight) + 28
+        // The shadow is the card's, not the window's: a decorated window already has a frame, and
+        // an inner drop shadow under a titlebar looks like a mistake. The layer itself stays on —
+        // disabling it (tried first) left the client area painting nothing at all, which read as a
+        // transparent window with a titlebar on it.
         layer.enabled: true
         layer.effect: MultiEffect {
-            shadowEnabled: true
+            shadowEnabled: !card.asWindow
             shadowBlur: 0.7
             shadowVerticalOffset: 4
             shadowColor: "#40000000"
@@ -120,15 +146,12 @@ Window {
                 }
                 // The way in to the settings. The card is where the checking happens, so it is
                 // where the backend is chosen; after the browser UI was removed there is no other
-                // surface at all.
+                // surface at all. It opens a *separate process* as a real window — see
+                // openSettings — because the panel is worked in, not glanced at.
                 Act {
                     flat: true
                     text: "AI runner"
-                    onClicked: {
-                        card.view = "settings"
-                        card.status = ""
-                        bridge.loadSettings()
-                    }
+                    onClicked: bridge.openSettings()
                 }
             }
             Text {

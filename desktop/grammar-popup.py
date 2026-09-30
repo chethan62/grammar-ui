@@ -20,11 +20,17 @@ heading.
 interaction, so the few seconds a small model needs are spent here rather than inside the watcher's
 ask path, where they would hold every other application's suggestions while the user waited.
 
-Positioning: under Wayland a client cannot choose its own position, so this asks for the X11 backend
+Positioning, and the two Qt platforms. A Wayland client is not told where other applications are,
+so a caret-anchored card cannot be placed natively: the *card* therefore asks for the X11 backend
 before Qt starts (QT_QPA_PLATFORM=xcb, the same trick GDK_BACKEND=x11 was) and sets
-BypassWindowManagerHint so the compositor neither moves nor decorates the window. The card never
-takes focus, so typing continues while it is up — which is also why Enter and Escape do nothing:
+BypassWindowManagerHint so the compositor neither moves nor decorates it. The card never takes
+focus, so typing continues while it is up — which is also why Enter and Escape do nothing:
 clicking is the interaction, and the notification covers the case where no card can be shown.
+
+The *settings panel* is a plain window that nobody positions, so it runs on the native platform —
+Wayland here — and the compositor places, decorates and moves it. Under XWayland a decorated window
+came up with its background painted and no content in it; `choose_platform` is where that split
+lives, and it is the only place the backend is chosen.
 
 Input, one of two ways:
 
@@ -45,13 +51,16 @@ test can tell placement from luck.
 
 import json
 import os
+import subprocess
 import sys
 import threading
 import urllib.error
 import urllib.request
 
-# Before Qt starts: positioning needs the X server, exactly as the GTK card needed GDK_BACKEND=x11.
-os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
+# The Qt platform is chosen in main(), by choose_platform(): it depends on which surface this
+# process is (a caret-anchored card needs the X server; a settings window does not) and the env var
+# has to be set before QGuiApplication is constructed. Setting it here unconditionally, as this did,
+# put a decorated window on XWayland and it came up with no content in it.
 
 # The pure half — findings, the card's contracts, its palette and its two HTTP calls — lives in
 # grammar_core, which imports nothing but the standard library. It is re-exported here because
@@ -85,6 +94,49 @@ except Exception as exc:  # noqa: BLE001 - any failure here means "use a notific
 HERE = os.path.dirname(os.path.abspath(__file__))
 QML = os.path.join(HERE, "grammar-card.qml")
 
+# The two window classes. A card is a popup — override-redirect so the compositor cannot move or
+# decorate it, and it never takes focus so the caret stays where the user is typing. The settings
+# panel is a window you work in: decorated by the compositor (drag/minimise/maximise for free) and
+# it takes focus, which is what typing an address, a model name or an API key requires.
+CARD_FLAGS = (Qt.FramelessWindowHint | Qt.X11BypassWindowManagerHint | Qt.WindowStaysOnTopHint
+              | Qt.WindowDoesNotAcceptFocus | Qt.Tool)
+PANEL_FLAGS = (Qt.Window | Qt.WindowTitleHint | Qt.WindowSystemMenuHint | Qt.WindowMinMaxButtonsHint
+               | Qt.WindowCloseButtonHint)
+
+
+def choose_platform(as_window):
+    """Which Qt platform plugin, and the only place that is decided.
+
+    The card is placed at the caret from the accessibility bus's coordinates, and Wayland does not
+    tell a client where another application is — so the card keeps the X path, where the X server
+    will honour a position (XWayland on a Wayland session, a real X server otherwise).
+
+    The settings panel is not positioned by us at all, so it takes the native platform and lets the
+    compositor place, decorate and move it. That is also what makes it render: on XWayland a
+    decorated Qt window here showed its background and none of its content.
+
+    An explicit QT_QPA_PLATFORM always wins, so a user or a test can still pin one.
+    """
+    pinned = os.environ.get("QT_QPA_PLATFORM")
+    if pinned:
+        return pinned
+    if as_window and os.environ.get("WAYLAND_DISPLAY"):
+        return "wayland"
+    return "xcb"
+
+
+def apply_window_class(window, as_window):
+    """The one place the window's class is decided, and the only place that changes it.
+
+    Called before exec(), so nothing is ever painted as the wrong kind of window. It is a call
+    rather than a QML `flags:` binding because a binding here would be overwritten by it; and each
+    process is exactly one of the two surfaces (the card's "AI runner" link opens a new process
+    rather than switching in place — see Bridge.openSettings).
+    """
+    window.setProperty("asWindow", as_window)
+    window.setProperty("view", "settings" if as_window else "finding")
+    window.setFlags(PANEL_FLAGS if as_window else CARD_FLAGS)
+
 
 class Bridge(QObject):
     """What the QML may call: answer, or ask the model. The network stays on this side."""
@@ -100,6 +152,23 @@ class Bridge(QObject):
     @Slot(str, str)
     def choose(self, action, text):
         self.chosen = {"action": action, "text": text}
+        self.app.quit()
+
+    @Slot()
+    def openSettings(self):
+        """The card's way in: a *new* process opens the panel, then the card goes away.
+
+        Not the card turning into a panel in place: the panel wants the native platform (the card
+        holds the X path so it can be placed at the caret) and one Qt process has one platform. A
+        separate process also means a panel that dies cannot take the card down with it, which is
+        the same reason the card is its own process.
+        """
+        env = dict(os.environ)
+        env.pop("QT_QPA_PLATFORM", None)      # let the child choose for itself: wayland for a panel
+        subprocess.Popen(
+            [sys.executable, os.path.abspath(__file__), "--settings", "--api", self.api_base],
+            env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            start_new_session=True)
         self.app.quit()
 
     @Slot(int, int)
@@ -189,6 +258,11 @@ def main():
             raw = ""
     payload = parse_payload(raw, args)
 
+    # Before Qt starts (QGuiApplication is what loads the platform plugin): the card needs the X
+    # path to be placed at the caret, the settings window takes the native platform. See the
+    # function for why the two surfaces differ.
+    os.environ["QT_QPA_PLATFORM"] = choose_platform(settings_mode)
+
     app = QGuiApplication(sys.argv[:1])
     # The desktop's own scheme, not a hardcoded one: light or dark comes from the platform palette,
     # and what those mean comes from card_colors(), which is where the colours can be tested.
@@ -211,7 +285,8 @@ def main():
     api_base = payload["api"] or opts["api"] or DEFAULT_API
     window.setProperty("payload", payload)
     window.setProperty("colors", colors)
-    window.setProperty("view", "settings" if settings_mode else "finding")
+    # sets asWindow, the view and the flags: a card is a popup, --settings is a window.
+    apply_window_class(window, settings_mode)
 
     bridge = Bridge(window, payload, app, api_base)
     engine.rootContext().setContextProperty("bridge", bridge)
@@ -239,11 +314,17 @@ def main():
                 g = app.primaryScreen().geometry()
                 x = g.x() + (g.width() - window.width()) // 2
                 y = g.y() + (g.height() - window.height()) // 2
-            window.setPosition(x, y)
-            # The size is reported with the position: a card that maps at 1x1 and positions "fine"
-            # is the failure this line exists to make visible, and it happened here once.
-            print("PLACED %d %d (asked %s) size %dx%d"
-                  % (window.x(), window.y(), asked, window.width(), window.height()),
+            # A Wayland compositor places its own windows and ignores setPosition, so don't ask:
+            # the numbers printed below are then the compositor's answer, not a request we made.
+            if os.environ.get("QT_QPA_PLATFORM") != "wayland":
+                window.setPosition(x, y)
+            # A Wayland compositor places its own windows and ignores setPosition, and a Wayland
+            # client is never told where it ended up — so the position is left out of the line
+            # rather than reported as 0 0, which reads like a bug. The size still matters: a card
+            # that maps at 1x1 is the failure this line exists to make visible.
+            placed = "PLACED (the compositor places it)" if os.environ.get("QT_QPA_PLATFORM") == "wayland" \
+                     else "PLACED %d %d (asked %s)" % (window.x(), window.y(), asked)
+            print("%s size %dx%d" % (placed, window.width(), window.height()),
                   file=sys.stderr, flush=True)
         # The settings panel's height arrives with its state, a round trip later, so it is measured
         # after that rather than at the finding card's 40 ms.
