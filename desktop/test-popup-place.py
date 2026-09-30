@@ -90,6 +90,29 @@ def test_clamp(popup):
     ok(popup.clamp(10, 20, 200, 120, []) == (10, 20),
        "with no monitors reported, the request is not mangled")
 
+    # A caret near the bottom of the screen: the card must not be pulled up over the very line being
+    # typed into, so it hangs above the caret instead — using the caret's own height, the one number
+    # only the accessibility side can see.
+    mon = [(0, 0, 1920, 1080)]
+    ok(popup.clamp(400, 300, 400, 320, mon, 20) == (400, 300),
+       "a card with room below the caret stays below it")
+    ok(popup.clamp(400, 1000, 400, 70, mon, 20) == (400, 1000),
+       "and a short card that still fits at the bottom stays there too")
+    flipped = popup.clamp(400, 1040, 400, 320, mon, 20)
+    ok(flipped == (400, 1040 - 20 - 2 * popup.CARET_GAP - 320),
+       "with no room below, the card hangs above the caret: %r" % (flipped,))
+    ok(popup.clamp(400, 1040, 400, 320, mon) == (400, 760),
+       "without the caret's height nothing is guessed: clamped as before, the old behaviour kept")
+    ok(popup.clamp(400, 1040, 400, 320, mon, 1000) == (400, 760),
+       "and with no room above either, the clamp is the best that is left")
+    # The flip has to use the monitor the caret is on, not the first one that happens to be listed.
+    stacked = [(0, 0, 1920, 1080), (1920, 312, 1360, 768)]
+    ok(popup.clamp(2000, 1040, 400, 320, stacked, 20) == (2000, 692),
+       "the flip uses the caret's own monitor: %r" % (popup.clamp(2000, 1040, 400, 320, stacked, 20),))
+    low = [(0, 0, 1920, 1080), (1920, 700, 1360, 380)]
+    ok(popup.clamp(2000, 1040, 400, 320, low, 20) == (2000, 760),
+       "and where that monitor has no room above, it clamps instead of leaving the screen")
+
 
 def test_motion(popup):
     """The desktop's animation factor is read as a multiplier, and a bad value never stops a card.

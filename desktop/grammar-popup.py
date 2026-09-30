@@ -70,8 +70,8 @@ import urllib.request
 # its directory on the path, so a plain `import grammar_core` would fail there while working when
 # the script is run directly.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from grammar_core import (MAX_CANDIDATES, MAX_CHIPS, REPHRASE_TIMEOUT, TONES, INTENTS, DEFAULT_API,
-                         action_json, api_error_message, candidates_from, card_colors,
+from grammar_core import (CARET_GAP, MAX_CANDIDATES, MAX_CHIPS, REPHRASE_TIMEOUT, TONES, INTENTS,
+                         DEFAULT_API, action_json, api_error_message, candidates_from, card_colors,
                          clamp, get_json, parse_payload, post_json, rephrase_body,
                          settings_view)
 
@@ -271,7 +271,7 @@ class Bridge(QObject):
 
 def main():
     args = sys.argv[1:]
-    opts = {"x": None, "y": None, "timeout": 0, "api": ""}
+    opts = {"x": None, "y": None, "timeout": 0, "api": "", "caret-h": None}
     for i, a in enumerate(args):
         key = a.lstrip("-")
         if key in opts and i + 1 < len(args):
@@ -343,7 +343,8 @@ def main():
             if opts["x"] is not None and opts["y"] is not None:
                 asked = "%s %s" % (opts["x"], opts["y"])
                 x, y = clamp(int(opts["x"]), int(opts["y"]),
-                             window.width(), window.height(), monitors)
+                             window.width(), window.height(), monitors,
+                             int(opts["caret-h"] or 0))
             else:
                 # The settings panel has no caret to sit beside, and an override-redirect window
                 # that is never placed lands in the corner: centre it on the primary screen.

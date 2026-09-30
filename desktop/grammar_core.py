@@ -266,14 +266,36 @@ def add_blocked(text, app):
     return (text or "").rstrip("\n") + ("\n" if text else "") + name + "\n"
 
 
-def clamp(x, y, w, h, monitors):
+# The space left between the caret's line and the card. Both ends need it: the watcher places the
+# request at the caret's bottom edge plus this, and clamp() undoes it to find the caret's top when it
+# has to hang the card above instead.
+CARET_GAP = 4
+
+
+def clamp(x, y, w, h, monitors, caret_h=0):
     """Keep the card on the monitor the caret is on; edge carets happen constantly.
 
     monitors is a list of (x, y, width, height) so this is testable without a display.
+
+    y is the position just *below* the caret, so a card with no room before the bottom of the screen
+    would be pulled up over the line being typed into — the one place it must not go, because that is
+    the text you are looking at. When the caret's own height is known (caret_h, from the same
+    accessibility rect) and there is room above, the card hangs above the caret instead. Without that
+    number nothing is guessed: the old behaviour stands, which is why it defaults to 0.
     """
+    def fit_y(y, my, mh):
+        """Below if it fits, above the caret if it must, and the best clamp if it fits nowhere."""
+        below = min(max(y, my), my + mh - h)
+        if caret_h <= 0 or below == y:
+            return below
+        # y is the caret's bottom edge plus CARET_GAP, so the caret's top is y - caret_h - CARET_GAP,
+        # and the card's bottom edge wants to rest one gap above that.
+        above = y - caret_h - 2 * CARET_GAP - h
+        return above if above >= my else below
+
     for mx, my, mw, mh in monitors:
         if mx <= x < mx + mw and my <= y < my + mh:
-            return (min(max(x, mx), mx + mw - w), min(max(y, my), my + mh - h))
+            return (min(max(x, mx), mx + mw - w), fit_y(y, my, mh))
     if monitors:
         # Nothing contains it, which happens for real: a caret can report a negative or
         # beyond-the-edge position (a window partly off-screen, a stale AT-SPI rect). Park the card
@@ -284,7 +306,7 @@ def clamp(x, y, w, h, monitors):
             mx, my, mw, mh = m
             return (x - (mx + mw / 2)) ** 2 + (y - (my + mh / 2)) ** 2
         mx, my, mw, mh = min(monitors, key=centre_distance)
-        return (min(max(x, mx), mx + mw - w), min(max(y, my), my + mh - h))
+        return (min(max(x, mx), mx + mw - w), fit_y(y, my, mh))
     return (x, y)
 
 

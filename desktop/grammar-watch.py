@@ -56,9 +56,9 @@ DEBUG = os.environ.get("GRAMMAR_WATCH_DEBUG") == "1"
 # its directory on the path, so a plain `import grammar_core` would fail there while working when
 # the script is run directly.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from grammar_core import (BACK, FORWARD, MIN_CHARS, TAIL, add_blocked, alternatives, app_blocked,
-                          block_list, blocked_apps, first_span, others, parse_reply, shown,
-                          snippet_window, suggestions)
+from grammar_core import (BACK, CARET_GAP, FORWARD, MIN_CHARS, TAIL, add_blocked, alternatives,
+                          app_blocked, block_list, blocked_apps, first_span, others, parse_reply,
+                          shown, snippet_window, suggestions)
 
 # The file the per-app pause is kept in — beside the engine's own config, because it is the same
 # question ("what does this machine want?") asked about a different thing. One name per line, and
@@ -137,6 +137,10 @@ def popup_actions(issue, position):
     if position is None or not os.path.exists(script):
         return None
     argv = [sys.executable, script, "--x", str(position[0]), "--y", str(position[1])]
+    if len(position) > 2 and position[2]:
+        # The caret's own height: enough for clamp() to hang the card above the line when the bottom
+        # of the screen is in the way, instead of putting it over the text being typed.
+        argv += ["--caret-h", str(int(position[2]))]
     # The card makes the rephrase call itself, so it needs the engine's address and the sentence.
     # Both arrive in the issue: the address from the client's own API constant (one source of the
     # default, not two), and an empty one simply means the card offers no rephrase row instead of
@@ -374,11 +378,16 @@ class Watcher:
 
     def caret_position(self, text, caret):
         """Where the caret is on screen, so the pop-up can sit next to it. None when the app
-        will not say — a notification is shown instead of a pop-up somewhere wrong."""
+        will not say — a notification is shown instead of a pop-up somewhere wrong.
+
+        Three numbers, not two: the height of the caret's own rect is what lets clamp() hang the card
+        *above* the line when there is no room below it, and only this side of the wire can see it.
+        """
         try:
             ext = Atspi.Text.get_character_extents(text, max(0, caret), Atspi.CoordType.SCREEN)
             if ext.width or ext.height:
-                return ext.x, ext.y + ext.height + 4     # just under the caret's line
+                # The caret's bottom edge plus a gap: just under the line being typed in.
+                return ext.x, ext.y + ext.height + CARET_GAP, ext.height
         except Exception:
             pass
         return None

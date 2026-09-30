@@ -10,14 +10,16 @@ CI and `make test` can just call python3.
 """
 
 import importlib.util
+import io
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
-import json
 import time
+import tokenize
 
 try:
     import gi
@@ -144,12 +146,18 @@ def test_reexports():
     worst possible moment: MIN_CHARS sat in check(), undefined, and every check died with a NameError
     while the unit still reported "active" and the log quietly filled with tracebacks. A name the
     module uses but cannot see is a bug no import-time error and no unit state can reveal.
+
+    Only code counts: comments and docstrings are stripped first, because this check is about what
+    runs. Its first version read the raw source and flagged ``clamp`` — a name mentioned in the prose
+    of caret_position's docstring, and never used.
     """
     import grammar_core                                     # sys.path has the script's directory
-    source = open(os.path.join(HERE, "grammar-watch.py")).read()
-    used = source.split("from grammar_core import", 1)[1]    # the module's own code
+    with open(os.path.join(HERE, "grammar-watch.py")) as fh:
+        source = fh.read()
+    code = " ".join(token.string for token in tokenize.generate_tokens(io.StringIO(source).readline)
+                    if token.type not in (tokenize.COMMENT, tokenize.STRING, tokenize.NL, tokenize.NEWLINE))
     missing = [name for name in dir(grammar_core) if not name.startswith("_")
-               and re.search(r"\b%s\b" % name, used) and not hasattr(watch, name)]
+               and re.search(r"\b%s\b" % name, code) and not hasattr(watch, name)]
     ok(not missing, "every grammar_core name the watcher uses is imported: missing %r" % missing)
 
 
