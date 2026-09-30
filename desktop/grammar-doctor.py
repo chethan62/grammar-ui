@@ -13,6 +13,7 @@ The chain, in order, each line carrying the fix rather than just the symptom:
 
     install      the binaries that must exist
     engine       grammar-server answering, and what version
+    listen       who can reach it — this machine, or the network with no auth
     engine lints the engine really flags a broken sentence — the end-to-end check
     rewrite      the rephrase backend (optional by design: checking never needs a model)
     watcher      the typing watcher unit
@@ -134,6 +135,43 @@ def check_engine(base):
             % (body.get("version", "?"), body.get("dialect", "?"), body.get("status", "?")), "")
 
 
+def listen_mode(listen):
+    """The rule, pure: who can reach an engine bound to this address.
+
+    Pure so it can be asserted without a machine (test-doctor.py). Both "0.0.0.0" and the IPv6
+    any-address mean every interface — reading that as loopback is the mistake this line exists
+    to catch, and it is a mistake a report about this machine made.
+    """
+    if not listen:
+        return "unknown"
+    host = listen.rsplit(":", 1)[0].strip("[]")
+    return "loopback" if host in ("127.0.0.1", "::1", "localhost") else "lan"
+
+
+def check_listen(base):
+    """Who can reach the engine — the state no other line reports.
+
+    Optional by design: binding to the network is a documented choice (a phone on it can then
+    check its writing), so it is reported with what it costs rather than treated as a fault.
+    It gets a line of its own because it is a property of how the process was started, not of
+    the engine answering — the two can disagree, and only this one says who can read your text.
+    """
+    status, body = http_json(base + "/status")
+    if status != 200:
+        return (False, False, "no answer from %s/status" % base, "")
+    listen = str(body.get("listen") or "")
+    mode = listen_mode(listen)
+    if mode == "unknown":
+        return (False, True, "not reported by this engine — an older build than the field", "")
+    if mode == "lan":
+        return (False, True,
+                "the network (%s) — anything on it can use this engine: unencrypted, no auth"
+                % listen,
+                "put `--host 127.0.0.1` back in deployments/systemd/grammar-server.service and "
+                "`make install` (grammar-server) to go back to loopback-only")
+    return (False, True, "this machine only (%s)" % listen, "")
+
+
 def check_lints(base):
     """The end-to-end one: a known-broken sentence must come back with findings."""
     status, body = http_json(base + "/v2/check", {"text": SAMPLE, "language": "en-US"})
@@ -239,6 +277,7 @@ def main():
     rows = [
         ("install", check_install()),
         ("engine", check_engine(base)),
+        ("listen", check_listen(base)),
         ("engine lints", check_lints(base)),
         ("rewrite", check_rewrite(base)),
         ("watcher", check_watcher()),

@@ -131,10 +131,35 @@ def test_install_check(doctor):
         print("  install: nothing installed here — the file list is asserted above")
 
 
+def test_listen_rule(doctor):
+    """The bind rule, pure: every-interface is not loopback.
+
+    Asserted rather than trusted because a report about this machine stated "127.0.0.1:8875"
+    while the unit was passing --host 0.0.0.0 — the value was read wrong, and the reading is
+    the only part of this that is logic rather than a request.
+    """
+    ok(doctor.listen_mode("0.0.0.0:8875") == "lan", "0.0.0.0 is every interface")
+    ok(doctor.listen_mode("[::]:8875") == "lan", "and so is the IPv6 any-address")
+    ok(doctor.listen_mode("0.0.0.0:8875") != "loopback", "neither is loopback")
+    ok(doctor.listen_mode("127.0.0.1:8875") == "loopback", "127.0.0.1 is loopback")
+    ok(doctor.listen_mode("localhost:8875") == "loopback", "and so is the name for it")
+    ok(doctor.listen_mode("") == "unknown", "an engine that reports nothing is unknown, not a fault")
+
+
+def test_listen_row(doctor):
+    """The row itself: an engine that is not there must not be reported as reachable."""
+    essential, okd, detail, fix = doctor.check_listen("http://127.0.0.1:9")
+    ok(essential is False, "who can reach the engine is not essential to the chain")
+    ok(okd is False, "with no engine it does not claim a healthy one: %r" % detail)
+    ok("no answer" in detail, "it says what it asked and got nothing")
+
+
 def main():
     doctor = load()
     test_verdict(doctor)
     test_install_check(doctor)
+    test_listen_rule(doctor)
+    test_listen_row(doctor)
     test_it_can_fail()
     test_it_can_pass()
     print("grammar-doctor: %d assertions - %s" % (PASS + FAIL, "passed" if not FAIL else "FAILED"))
