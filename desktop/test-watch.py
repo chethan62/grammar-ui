@@ -107,6 +107,36 @@ def test_suggestions():
 
 
 # ---- the notification contract ---------------------------------------------------------
+def test_blocklist():
+    """The per-app pause: what the file says, what counts as blocked, and what a click adds."""
+    ok(watch.blocked_apps("# a comment\nFirefox\n\n  Thunderbird  \n") == ["firefox", "thunderbird"],
+       "the list is one name per line, comments and blanks ignored")
+    ok(watch.blocked_apps("") == [], "an empty file lists nothing")
+    ok(watch.app_blocked("Konsole", watch.block_list("")) is True,
+       "a terminal is blocked without anyone asking")
+    ok(watch.app_blocked("KeePassXC", watch.block_list("")) is True,
+       "a password manager is blocked without anyone asking")
+    ok(watch.app_blocked("LibreOffice Writer", watch.block_list("")) is False,
+       "an ordinary application is not blocked")
+    ok(watch.app_blocked("Firefox", watch.block_list("firefox\n")) is True,
+       "the file blocks what it names, whatever the case")
+    ok(watch.app_blocked("this application", watch.block_list("")) is False,
+       "an unnamed application is never blocked by accident")
+    ok(watch.app_blocked("", watch.block_list("firefox")) is False, "nothing named blocks nothing")
+    ok(watch.add_blocked("", "Firefox") == "Firefox\n", "adding to an empty file writes one line")
+    ok(watch.add_blocked("Thunderbird\n", "Firefox") == "Thunderbird\nFirefox\n",
+       "adding keeps what was there")
+    ok(watch.app_blocked("Visual Studio Code", watch.block_list("code\n")) is True,
+       "one entry covers the application's longer name as well")
+    ok(watch.add_blocked("Firefox\n", "Firefox") == "Firefox\n",
+       "adding what is already there does not grow the file")
+    ok(watch.add_blocked("", "Konsole") == "",
+       "a default is not written out: it is already in force")
+    ok(watch.add_blocked("Firefox\n", "  ") == "Firefox\n", "an empty name adds nothing")
+    ok(watch.app_blocked("Firefox", watch.block_list(watch.add_blocked("", "Firefox"))) is True,
+       "and the result blocks the application that was added")
+
+
 def test_notification(tmp):
     stub = os.path.join(tmp, "notify-send")
     with open(stub, "w") as fh:
@@ -750,6 +780,7 @@ def main():
     tmp = tempfile.mkdtemp(prefix="grammar-watch-test-")
     test_window()
     test_suggestions()
+    test_blocklist()
     test_notification(tmp)
     test_module_loading(tmp)
     test_popup(tmp)

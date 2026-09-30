@@ -91,6 +91,29 @@ def test_clamp(popup):
        "with no monitors reported, the request is not mangled")
 
 
+def test_motion(popup):
+    """The desktop's animation factor is read as a multiplier, and a bad value never stops a card.
+
+    The host passes it to QML as `motion`, and every duration in the card is scaled by it, so 0
+    means no animation and 0.25 means a quarter of it. What matters here is that nothing in the
+    chain can throw or hang on a value that is missing, empty or nonsense.
+    """
+    ok(popup.motion_factor("0.25") == 0.25,
+       "the desktop's own factor is honoured: 0.25")
+    ok(popup.motion_factor("0") == 0.0,
+       "zero means no animation at all")
+    ok(popup.motion_factor("") == 1.0,
+       "an unset key means normal speed, not zero")
+    ok(popup.motion_factor(None) == 1.0 or popup.motion_factor(None) >= 0.0,
+       "a bare call reads this desktop without throwing (%r)" % popup.motion_factor(None))
+    ok(popup.motion_factor("nonsense") == 1.0,
+       "an unparseable value means normal speed")
+    ok(popup.motion_factor("-3") == 0.0,
+       "a negative factor is pinned to zero, never a negative duration")
+    ok(popup.motion_factor("999") == 4.0,
+       "a stray huge value is clamped rather than obeyed")
+
+
 def test_payload(popup):
     """The card's input contract, which is pure: stdin JSON, the old argv flags, and junk."""
     got = popup.parse_payload(
@@ -114,6 +137,14 @@ def test_payload(popup):
     ok(popup.parse_payload('{"others": "junk"}')["others"] == 0,
        "and junk in it is zero, which draws nothing rather than raising")
     ok(popup.parse_payload("{}")["others"] == 0, "a card with no count at all is zero")
+    # The same trap, one field later: the pause button is drawn from payload.app, so a payload that
+    # carries the application must arrive with it — and one that does not must be empty, which
+    # hides the button rather than naming an application the host never identified.
+    ok(popup.parse_payload('{"app": "Firefox"}')["app"] == "Firefox",
+       "the application the card is shown in reaches the card's payload")
+    ok(popup.parse_payload('{"app": "  "}')["app"] == "",
+       "and whitespace is no application at all")
+    ok(popup.parse_payload("{}")["app"] == "", "a card with no application has none")
     # The GTK card shipped Pango markup and had to escape the document's text by hand; the QML
     # card renders plain text, so that escaping is gone by construction. What is left to check is
     # the palette it is rendered in: complete in both schemes, and legible in both.
@@ -245,6 +276,30 @@ def test_settings(popup):
     ok(others == ["good", "bad", "idle"],
        "and the pill's tone distinguishes working, not answering and off: %r" % others)
 
+    # Where the key is, as the panel must state it: the engine reports the source, and the note has
+    # to follow it rather than describing a file that may not be the one holding the key.
+    ok(popup.settings_view({"provider": "openai", "keyEnv": "OPENAI_API_KEY", "keySet": True,
+                            "keySource": "keyring", "writable": True})["keyNote"]
+       == "a key is saved in your desktop keyring (OPENAI_API_KEY in the environment overrides it)",
+       "a keyring key is described as a keyring key")
+    ok("0600 file" in popup.settings_view({"provider": "openai", "keyEnv": "OPENAI_API_KEY",
+                                           "keySet": True, "keySource": "file",
+                                           "writable": True})["keyNote"],
+       "a file key is still described as a file, for the machine where that is true")
+    ok(popup.settings_view({"provider": "openai", "keyEnv": "OPENAI_API_KEY", "keySet": True,
+                            "keySource": "env", "writable": True})["keyNote"]
+       == "the key comes from OPENAI_API_KEY in the environment",
+       "an environment key says so, and promises nothing else")
+    ok("0600" not in popup.settings_view({"provider": "openai", "keyEnv": "OPENAI_API_KEY",
+                                          "keySet": True, "keySource": "keyring",
+                                          "writable": True})["keyNote"],
+       "and a keyring key never claims to be a file")
+    # An engine with no keySource field at all (an older one): the sentence that was true then.
+    ok(popup.settings_view({"provider": "openai", "keyEnv": "OPENAI_API_KEY", "keySet": True,
+                            "writable": True})["keyNote"]
+       == "a key is saved (OPENAI_API_KEY in the environment overrides it)",
+       "an older engine still gets an honest note")
+
     empty = popup.settings_view({})
     ok(empty["presets"][-1]["id"] == "none" and empty["status"] == "" and empty["models"] == [],
        "an empty state still yields a usable panel: %r" % empty)
@@ -359,6 +414,7 @@ def main():
         popup = None
     if popup is not None:
         test_clamp(popup)
+        test_motion(popup)
         test_payload(popup)
         test_settings(popup)
     test_live()

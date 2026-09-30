@@ -56,8 +56,16 @@ DEBUG = os.environ.get("GRAMMAR_WATCH_DEBUG") == "1"
 # its directory on the path, so a plain `import grammar_core` would fail there while working when
 # the script is run directly.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from grammar_core import (BACK, FORWARD, TAIL, alternatives, first_span, others, parse_reply,
-                          shown, snippet_window, suggestions)
+from grammar_core import (BACK, FORWARD, TAIL, add_blocked, alternatives, app_blocked, block_list,
+                          blocked_apps, first_span, others, parse_reply, shown, snippet_window,
+                          suggestions)
+
+# The file the per-app pause is kept in — beside the engine's own config, because it is the same
+# question ("what does this machine want?") asked about a different thing. One name per line, and
+# the defaults in grammar_core are always in force, so this starts empty and only grows by choice.
+BLOCKLIST = os.path.join(
+    os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
+    "grammar-server", "blocked-apps")
 
 
 
@@ -225,6 +233,57 @@ class Watcher:
         except Exception:
             return "this application"
 
+    def blocklist(self):
+        """The blocklist in force, read per check.
+
+        It is a few hundred bytes, and a setting that only takes effect after a restart is a
+        setting that looks broken — the whole point is that the pause takes hold the moment it is
+        asked for. ponytail: one file read per pause; cache it on mtime if it ever shows up in a
+        profile.
+        """
+        try:
+            with open(BLOCKLIST) as fh:
+                return block_list(fh.read())
+        except OSError:
+            return block_list("")
+
+    def pause_here(self):
+        """Stop checking in this application — what the card's "Ignore in <app>" asks for.
+
+        Written to a file rather than held in memory: the promise is about this application, and it
+        has to survive the next restart of the watcher. A toast says so, and says where to undo it,
+        because a rule the user cannot find again is a bug report waiting to happen.
+        """
+        name = self.app_name()
+        if name == "this application":   # the bus would not say: never write a rule about nobody
+            debug("the focused application will not name itself; nothing paused")
+            return
+        try:
+            with open(BLOCKLIST) as fh:
+                text = fh.read()
+        except OSError:
+            text = ""
+        updated = add_blocked(text, name)
+        if updated == text:
+            # Already paused — by this click before, or by a default. Saying so again would be a
+            # toast that reports nothing was done, and repeated identical toasts are throttled by
+            # the notification daemon anyway.
+            debug("already paused in %s" % name)
+            return
+        try:
+            os.makedirs(os.path.dirname(BLOCKLIST), exist_ok=True)
+            with open(BLOCKLIST, "w") as fh:
+                fh.write(updated)
+        except OSError as exc:
+            debug("could not write %s: %s" % (BLOCKLIST, exc))
+            return
+        debug("paused in %s" % name)
+        if shutil.which("notify-send"):
+            subprocess.Popen(["notify-send", "-a", "grammar", "-t", "5000",
+                              "Paused in %s" % name,
+                              "Checking is off in this application. Delete its line from %s "
+                              "to bring it back." % BLOCKLIST])
+
     # ---- the check ----------------------------------------------------------------------
     def check(self):
         self.timer = None
@@ -235,6 +294,12 @@ class Watcher:
                 return False  # they moved on; a debounce that fired late is stale
         except Exception:
             pass
+        # A paused application is skipped before anything is read, so a password field is never even
+        # sent to the engine: the pause is about privacy as much as about noise.
+        app = self.app_name()
+        if app_blocked(app, self.blocklist()):
+            debug("paused in %s" % app)
+            return False
         try:
             text, _ = read(self.target)
             count = Atspi.Text.get_character_count(text)
@@ -289,6 +354,10 @@ class Watcher:
                  # The span a chip replaces: the finding's own words, absolute in the document.
                  # Fix sentence is the button that takes the whole line.
                  "span": [begin + start + span[0], begin + start + span[0] + span[1]],
+                 # Which application this is, for the pause action. Empty when the bus will not say:
+                 # a card offering "Ignore in this application" would be promising a rule about
+                 # nobody, and the button is hidden rather than wrong.
+                 "app": "" if app == "this application" else app,
                  # The badge is the engine's real time, not a decoration: it is how the user sees
                  # whether a suggestion is instant or cost something.
                  "badge": "Rules engine · %d ms" % round(self.last_engine_ms or 0),
@@ -329,6 +398,11 @@ class Watcher:
                 # meant "apply the whole sentence".
                 answer = {"action": "sentence" if answer == "fix" else "", "text": ""}
             action = answer.get("action")
+            if action == "ignore-app":
+                # Not an edit: this pauses checking in this application, so it is answered before
+                # any of the text guards — there is no text here to have gone stale.
+                self.pause_here()
+                return
             if action not in ("replace", "sentence", "copy"):
                 return
             if not self.unchanged(start, end, piece):

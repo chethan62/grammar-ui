@@ -83,7 +83,7 @@ from grammar_core import (MAX_CANDIDATES, MAX_CHIPS, REPHRASE_TIMEOUT, TONES, IN
 # ---- the host -----------------------------------------------------------------------------------
 
 try:
-    from PySide6.QtCore import QObject, Qt, QTimer, Slot, QUrl          # noqa: F401
+    from PySide6.QtCore import QObject, QSettings, Qt, QTimer, Slot, QUrl   # noqa: F401
     from PySide6.QtGui import QGuiApplication, QPalette
     from PySide6.QtQml import QQmlApplicationEngine
 except Exception as exc:  # noqa: BLE001 - any failure here means "use a notification"
@@ -116,6 +116,31 @@ def choose_platform(_in_settings=False):
     panel would be a second window in a second process, which is what "one UI" rules out.
     """
     return os.environ.get("QT_QPA_PLATFORM") or "xcb"
+
+
+def motion_factor(raw=None):
+    """How fast animations should run here: the desktop's own knob, as a multiplier.
+
+    KDE publishes this as `AnimationDurationFactor` in kdeglobals — 1.0 is normal, 0.25 is a
+    quarter duration (this desktop's setting), and 0 means no animations at all, which is what a
+    reduced-motion request actually asks for. Scaling by it is more honest than a boolean: a user
+    who chose 0.25 should get 30 ms, not "animate exactly as before".
+
+    Qt has no hint for this (checked: QStyleHints in 6.11.2 carries none), and the key is a desktop
+    convention rather than a freedesktop one, so this reads the one that exists here. ponytail:
+    KDE-only; add the GNOME key (gsettings) or a platform hint if Qt grows one, when a second
+    desktop has to be served. An unreadable value means 1.0 — motion is decoration, never worth
+    failing a card over.
+    """
+    if raw is None:
+        path = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
+                            "kdeglobals")
+        raw = QSettings(path, QSettings.IniFormat).value("KDE/AnimationDurationFactor")
+    try:
+        factor = float(raw)
+    except (TypeError, ValueError):
+        return 1.0
+    return min(max(factor, 0.0), 4.0)      # clamped: a stray value must not stall the entrance
 
 
 def apply_view(window, in_settings):
@@ -294,6 +319,9 @@ def main():
     api_base = payload["api"] or opts["api"] or DEFAULT_API
     window.setProperty("payload", payload)
     window.setProperty("colors", colors)
+    # The desktop's animation factor, so the card's entrance follows the same knob the rest of the
+    # session does (see motion_factor).
+    window.setProperty("motion", motion_factor())
     # sets the view and its flags: the finding view is the card, the panel is that same window.
     apply_view(window, settings_mode)
 

@@ -45,6 +45,8 @@ Window {
     property string view: "finding"  // "finding" | "settings"
     property string status: ""
     property bool busy: false
+    // The desktop's animation-duration factor, from the host: 1.0 normal, 0.25 a quarter, 0 none.
+    property real motion: 1.0
 
     readonly property bool hasAlts: payload.alts !== undefined && payload.alts.length > 1
     readonly property bool canRephrase: payload.api !== undefined && payload.api.length > 0
@@ -83,8 +85,9 @@ Window {
         keyField.text = ""
     }
 
-    // The whole card's entrance: short enough that it feels like it was already there.
-    OpacityAnimator on opacity { from: 0; to: 1; duration: 120 }
+    // The whole card's entrance: short enough that it feels like it was already there, and scaled
+    // by the desktop's animation factor — at 0 it is not an animation at all, which is the point.
+    OpacityAnimator on opacity { from: 0; to: 1; duration: Math.round(120 * card.motion) }
     Component.onCompleted: visible = true
 
     Rectangle {
@@ -204,6 +207,18 @@ Window {
                 Act { text: "Ignore"; onClicked: bridge.choose("", "") }
                 Act { text: "Copy"; onClicked: bridge.choose("copy", "") }
                 Act { text: "Fix sentence"; primary: true; onClicked: bridge.choose("sentence", "") }
+            }
+            // Pausing in this application, offered from the surface that is already open: the
+            // alternative is a settings list nobody opens to discover a problem. Its own line and
+            // low emphasis, because it is a standing choice about the application, not an action on
+            // this finding — and hidden when the host does not know the application's name, since a
+            // button that cannot keep its promise is worse than no button.
+            Act {
+                flat: true
+                anchors.right: parent.right
+                visible: card.payload.app !== undefined && card.payload.app.length > 0
+                text: "Ignore in " + card.payload.app
+                onClicked: bridge.choose("ignore-app", "")
             }
 
             // ---- the model's own answers --------------------------------------------------
@@ -432,8 +447,7 @@ Window {
                 // server would suggest something is missing when nothing is.
                 visible: card.s("needsKey", false)
                 label: "API KEY"
-                note: card.s("keyNote", "") + " — stored 0600 on the machine the engine runs on, "
-                      + "never sent back, and only settable from that machine."
+                note: card.s("keyNote", "") + " — never sent back, and only settable from that machine."
                 TextField {
                     id: keyField
                     width: parent.width
@@ -582,7 +596,7 @@ Window {
             }
             border.width: act.flat || act.primary ? 0 : 1
             border.color: card.c("border", "#e2e5ea")
-            Behavior on color { ColorAnimation { duration: 90 } }
+            Behavior on color { ColorAnimation { duration: Math.round(90 * card.motion) } }
         }
     }
 }

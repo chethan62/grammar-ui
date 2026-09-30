@@ -211,8 +211,59 @@ def parse_payload(raw, argv=None):
             "api": as_text("api").rstrip("/"), "sentence": as_text("sentence"),
             # Every field the watcher sends has to be named here or it never reaches the card:
             # this whitelist is exactly where "others" was dropped, and the QML seam test cannot
-            # see that half of the seam.
-            "others": as_count("others")}
+            # see that half of the seam. "app" is the same trap, one field later — the pause button
+            # reads it, and without this line the button never appears.
+            "others": as_count("others"), "app": as_text("app")}
+
+
+# ---- per-app pause ------------------------------------------------------------------------------
+# Some applications are not worth checking: a password manager's fields are secrets, and a
+# terminal's text is commands, where "misspellings" are mostly false. The list is a plain text file
+# — one application name per line, '#' comments, because it is user data rather than config — and
+# these defaults are always in force, so the first run already spares the obvious places.
+BLOCKED_ALWAYS = ("keepassxc", "keepass", "bitwarden", "1password", "gnome-keyring", "kwallet",
+                  "konsole", "yakuake", "alacritty", "kitty", "wezterm", "foot", "xterm",
+                  "gnome-terminal")
+
+
+def blocked_apps(text):
+    """The names in a blocklist file: one per line, '#' comments and blank lines ignored."""
+    names = []
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            names.append(line.lower())
+    return names
+
+
+def block_list(text):
+    """The list in force: the defaults, plus whatever the user has added."""
+    return list(BLOCKED_ALWAYS) + blocked_apps(text)
+
+
+def app_blocked(app, listed):
+    """Is checking paused in this application?
+
+    Matched case-insensitively, a listed name counting if it appears anywhere in the application's
+    name — the accessibility bus says "Konsole" and "firefox", and the same application can present
+    itself differently from desktop to desktop. ponytail: substring matching can over-match (an
+    entry of "mail" would pause in everything with mail in its name); it is the honest first cut,
+    and the alternative — never matching the application the user meant — is worse.
+    """
+    name = (app or "").strip().lower()
+    return bool(name) and any(entry in name for entry in listed)
+
+
+def add_blocked(text, app):
+    """A blocklist file with this application added, once.
+
+    Adding a name that is already there (or already covered by a default) would grow the file on
+    every click, and that file is what a person reads to undo this.
+    """
+    name = (app or "").strip()
+    if not name or app_blocked(name, block_list(text)):
+        return text or ""
+    return (text or "").rstrip("\n") + ("\n" if text else "") + name + "\n"
 
 
 def clamp(x, y, w, h, monitors):
@@ -325,6 +376,24 @@ def get_json(url, timeout=REPHRASE_TIMEOUT):
 
 # ---- the settings panel's view of GET /v1/ai ---------------------------------------------------
 
+def key_note(key_set, key_env, key_source=""):
+    """One line under the key field: where the key actually is.
+
+    The engine reports the source, so this never claims a location it was not told about — a keyring
+    is not a file, and telling someone their key sits in a 0600 file when it is in their wallet is
+    the kind of small lie that costs trust in the rest of the panel. An engine too old to report a
+    source gets the sentence that was true then.
+    """
+    if key_set and key_source == "env":
+        return "the key comes from %s in the environment" % key_env
+    if not key_set:
+        return "a key is needed" if key_env else "not needed for this runner"
+    where = {"keyring": "a key is saved in your desktop keyring",
+             "file": "a key is saved in a 0600 file on the engine's machine",
+             }.get(key_source, "a key is saved")
+    return where + (" (%s in the environment overrides it)" % key_env if key_env else "")
+
+
 def settings_view(state):
     """What the AI-runner settings panel shows, from the server's GET /v1/ai answer. Pure.
 
@@ -388,6 +457,5 @@ def settings_view(state):
             "writable": state.get("writable") is not False, "status": status, "tone": tone,
             "keyEnv": key_env, "keySet": key_set, "needsKey": bool(key_env),
             # What the key field says under it. The value itself is never sent anywhere: the
-            # server accepts one and reports only whether it has one.
-            "keyNote": ("a key is saved (%s in the environment overrides it)" % key_env) if key_set
-                       else ("a key is needed" if key_env else "not needed for this runner")}
+            # server accepts one and reports only whether it has one, and now where it keeps it.
+            "keyNote": key_note(key_set, key_env, str(state.get("keySource") or ""))}
