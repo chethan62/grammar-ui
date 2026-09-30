@@ -39,15 +39,26 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 # ponytail: fixed-size read around the caret — one cheap read per pause instead of reading a
 # whole 50-page document. Widen BACK if suggestions ever miss a sentence that starts further up.
-BACK, FORWARD, TAIL = 500, 300, 240
 DEBOUNCE_MS = 1200
 # ponytail: events are the fast path, but LibreOffice's a11y event emission is partial — a
 # slow poll is what makes this work in the app it was built for. One bounded read per tick;
 # the engine is only asked when the text actually changed.
 POLL_MS = 1500
 COOLDOWN_S = 5.0
-MIN_CHARS = 12
 DEBUG = os.environ.get("GRAMMAR_WATCH_DEBUG") == "1"
+
+# The pure half — findings, the card's contracts, its palette and its two HTTP calls — lives in
+# grammar_core, which imports nothing but the standard library. It is re-exported here because
+# callers and gates have always reached these names through this module, and because a module
+# that needs gi or Qt to import cannot be reasoned about on a machine without them.
+#
+# sys.path first: the gates load this file by path (spec_from_file_location), which does not put
+# its directory on the path, so a plain `import grammar_core` would fail there while working when
+# the script is run directly.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from grammar_core import (BACK, FORWARD, TAIL, alternatives, first_span, others, parse_reply,
+                          shown, snippet_window, suggestions)
+
 
 
 def debug(*args):
@@ -90,46 +101,6 @@ def read(obj, start=None, end=None):
     return text, Atspi.Text.get_text(text, start, end)
 
 
-def snippet_window(text, caret, back=BACK, forward=FORWARD):
-    """The whole sentences around `caret` as (start, end) offsets into `text`.
-
-    Snapping back to a sentence boundary keeps the engine from being handed a fragment, which
-    it duly reports as an incomplete sentence.
-    """
-    start = max(0, caret - back)
-    # From caret - 2, not caret - 1: while typing, the caret sits right after the final period
-    # of the sentence just written, and snapping to that boundary returns an empty window.
-    for i in range(caret - 2, start - 1, -1):
-        if text[i] in ".!?\n":
-            start = i + 1
-            break
-    end = min(len(text), caret + forward)
-    limit = min(len(text), end + TAIL)
-    for i in range(end, limit):
-        if text[i] in ".!?\n":
-            end = i + 1
-            break
-        end = i + 1
-    while start < end and text[start].isspace():
-        start += 1
-    return start, end
-
-
-def suggestions(text, matches):
-    """(old, new, reason) per finding, in document order.
-
-    Structured rather than pre-rendered, because the card shows the diff and the reason apart,
-    while a notification only has room for "old → new".
-    """
-    out = []
-    for m in sorted(matches, key=lambda m: m["offset"]):
-        if not m.get("replacements"):
-            continue
-        old = text[m["offset"]:m["offset"] + m["length"]].strip()
-        out.append((old, m["replacements"][0]["value"], m["message"].strip().replace("\n", " ")))
-    return out
-
-
 def notify_actions(summary, body, actions=(("fix", "Fix it"), ("copy", "Copy fix")), timeout=25):
     """A toast with buttons; returns the key of the button pressed ("" if it went away)."""
     if not shutil.which("notify-send"):
@@ -142,84 +113,6 @@ def notify_actions(summary, body, actions=(("fix", "Fix it"), ("copy", "Copy fix
         return subprocess.run(cmd, capture_output=True, timeout=timeout).stdout.decode().strip()
     except subprocess.SubprocessError:
         return ""
-
-
-def shown(matches):
-    """The one finding the card is showing: the first in document order that carries a replacement.
-
-    This rule had three copies — in alternatives(), in first_span() and in the count for "more
-    issues" — and two of them carried a comment warning that they must not drift, because a chip
-    that picked a different finding than the span would rewrite the text somewhere else in the
-    sentence. It lives here once now. Pure.
-    """
-    for m in sorted(matches, key=lambda m: m["offset"]):
-        if m.get("replacements"):
-            return m
-    return None
-
-
-def alternatives(matches):
-    """Every replacement the engine offered for the finding the card is showing, in its own order.
-
-    The card used to receive only replacements[0], so a spelling fix offered "Teh" and hid "the",
-    "tea" and "tech" — the engine had already found them. Pure, so the ordering and the
-    de-duplication are testable without a display.
-    """
-    match = shown(matches)
-    if match is None:
-        return []
-    out = []
-    for rep in match["replacements"]:
-        value = (rep.get("value") or "").strip()
-        if value and value not in out:
-            out.append(value)
-    return out
-
-
-def first_span(matches):
-    """Where the finding the card is showing sits, as (offset, length) in the checked window.
-
-    It must pick the same match alternatives() does — both now call shown() — or a chip would
-    rewrite the text somewhere else in the sentence. The pair is asserted together in
-    test-watch.py for that reason.
-    """
-    match = shown(matches)
-    if match is None:
-        return 0, 0
-    return int(match["offset"]), int(match["length"])
-
-
-def others(matches):
-    """How many *other* findings with a fix the same sentence has, for the card to mention.
-
-    A sentence carrying two issues showed one and said nothing about the second, so fixing what
-    the card named left the line still underlined with no explanation — measured on this project's
-    own sample, "She go to the office.", which the engine flags twice. Pure.
-    """
-    with_fix = [m for m in matches if m.get("replacements")]
-    return max(0, len(with_fix) - (1 if shown(matches) is not None else 0))
-
-
-def parse_reply(text):
-    """The card's answer: its JSON line, or the older plain word. Pure.
-
-    Tolerant because this crosses a process boundary, and anything unrecognised is a dismissal
-    rather than a fix — a garbled line must never edit the user's document.
-    """
-    text = (text or "").strip()
-    if not text:
-        return None
-    if not text.startswith("{"):
-        # The pre-JSON contract, still accepted: "fix" meant the sentence, "copy" the clipboard.
-        return {"action": "sentence", "text": ""} if text == "fix" else (
-            {"action": "copy", "text": ""} if text == "copy" else None)
-    try:
-        data = json.loads(text)
-    except ValueError:
-        return None
-    if not isinstance(data, dict) or not data.get("action"):
-        return None
-    return {"action": str(data["action"]), "text": str(data.get("text") or "")}
 
 
 def popup_actions(issue, position):

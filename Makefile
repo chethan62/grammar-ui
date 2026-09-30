@@ -24,6 +24,7 @@ install:
 	install -m755 desktop/grammar-watch.py $(BINDIR)/grammar-watch
 	install -m755 desktop/grammar-popup.py $(BINDIR)/grammar-popup.py
 	install -m755 desktop/grammar-doctor.py $(BINDIR)/grammar-doctor
+	install -m644 desktop/grammar_core.py $(BINDIR)/grammar_core.py
 	install -m644 desktop/grammar-card.qml $(BINDIR)/grammar-card.qml
 	sed 's|@BINDIR@|$(BINDIR)|' deployments/grammar-lookup.desktop > $(APPDIR)/grammar-lookup.desktop
 	sed 's|@BINDIR@|$(BINDIR)|' deployments/grammar-settings.desktop > $(APPDIR)/grammar-settings.desktop
