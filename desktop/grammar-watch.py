@@ -444,13 +444,29 @@ class Watcher:
                 return
             if action == "replace":
                 span = issue.get("span") or [start, end]
-                self.replace(span[0], span[1], answer.get("text") or issue.get("new") or "")
+                text = answer.get("text") or issue.get("new") or ""
+                applied = self.replace(span[0], span[1], text)
             elif action == "sentence":
                 # A chip from the card's own Rephrase carries its text; Fix sentence does not and
                 # means the correction the watcher already computed.
-                self.replace(start, end, answer.get("text") or fixed)
+                text = answer.get("text") or fixed
+                applied = self.replace(start, end, text)
             else:
                 self.client.copy(fixed)
+                return
+            if applied is False:
+                # A document that cannot be edited is not a crash and must not be a silence: put the
+                # correction on the clipboard and say what happened. This is the difference between
+                # a click that appears broken and one that still did the useful thing.
+                #
+                # Tested with `is False`, not truthiness: only an explicit refusal means the edit
+                # did not happen, so a replace() that returns nothing (an older implementation, a
+                # stand-in in a test) keeps the behaviour it always had.
+                self.client.copy(text)
+                self.ask({"old": text, "new": "",
+                          "reason": "This document cannot be edited from here",
+                          "summary": "Copied instead",
+                          "more": "Paste it where you need it, or select text and press Ctrl+Alt+C."})
         finally:
             self.busy = False
 
@@ -463,12 +479,31 @@ class Watcher:
             return False
 
     def replace(self, start, end, replacement):
-        """Replace a range through the app's own text interface, so its undo owns the edit."""
-        editable = self.target.get_editable_text_iface()
-        editable.delete_text(start, end)
-        if replacement:
-            editable.insert_text(start, replacement, len(replacement))
-        Atspi.Text.set_caret_offset(self.target.get_text_iface(), start + len(replacement))
+        """Replace a range through the app's own text interface, so its undo owns the edit.
+
+        Returns True when the text actually changed. A document that cannot be edited is a real
+        case — a read-only file, a protected sheet, a viewer that publishes text but no
+        EditableText — and this used to raise straight out of a daemon thread: the click did
+        nothing at all, and the only trace was a dead thread in the journal.
+        """
+        try:
+            editable = self.target.get_editable_text_iface()
+            if editable is None:
+                return False
+            editable.delete_text(start, end)
+            if replacement:
+                editable.insert_text(start, replacement, len(replacement))
+        except Exception as exc:  # noqa: BLE001 - any refusal means "cannot edit here", not "crash"
+            debug("cannot edit here: %s" % exc)
+            return False
+        # The edit is done: where the caret lands is a courtesy, and some apps accept an edit but
+        # not a caret set. Letting that raise would report a failure for a change that happened —
+        # and the card would say "copied instead" about text it had just fixed.
+        try:
+            Atspi.Text.set_caret_offset(self.target.get_text_iface(), start + len(replacement))
+        except Exception as exc:  # noqa: BLE001
+            debug("caret not moved after the edit: %s" % exc)
+        return True
 
 
 def listen(watcher):

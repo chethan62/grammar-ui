@@ -601,6 +601,104 @@ def test_popup(tmp):
        "the pop-up follows the caret onto the second monitor")
 
 
+def test_edit_refusal(module):
+    """A document that cannot be edited must not swallow the click.
+
+    replace() used to raise out of a daemon thread, so a Fix in a read-only document did nothing
+    at all: no error on screen, a dead thread in the journal, and a button that looked broken. The
+    correction now goes to the clipboard and the card says what happened, which is the useful half
+    of the outcome. Headless: the target is a stand-in, so this runs in CI.
+    """
+    class Refusing:
+        """A viewer that publishes text but offers no EditableText — a PDF, a protected sheet."""
+        def get_editable_text_iface(self):
+            return None
+
+        def get_text_iface(self):
+            return None
+
+    class Exploding:
+        """An app that raises when asked to edit, which is the same answer in a worse mood."""
+        def get_editable_text_iface(self):
+            raise RuntimeError("no such interface")
+
+        def get_text_iface(self):
+            raise RuntimeError("no such interface")
+
+    class StubClient:
+        API = "http://127.0.0.1:8875"
+
+        def __init__(self):
+            self.copied = []
+
+        def copy(self, text):
+            self.copied.append(text)
+
+        def check(self, text):
+            return {"matches": []}
+
+        def fix_until_stable(self, text, check):
+            return text
+
+    for target, label in ((Refusing(), "publishes no editable interface"),
+                          (Exploding(), "raises when asked to edit")):
+        client = StubClient()
+        asked = []
+        watcher = module.Watcher(client, cooldown=0.0,
+                                 ask=lambda issue, pos=None: (asked.append(issue),
+                                                              {"action": "sentence",
+                                                               "text": "the"})[1])
+        watcher.target = target
+        watcher.unchanged = lambda *a: True          # the text is fine; the app is the problem
+        ok(watcher.replace(0, 3, "the") is False,
+           "replace() reports the refusal when the document %s" % label)
+        watcher.offer(0, 3, "teh", "the corrected sentence",
+                      {"old": "teh", "new": "the", "span": [0, 3]}, None)
+        ok(client.copied == ["the"],
+           "and the correction still reaches the clipboard: %r" % client.copied)
+        ok(asked and "cannot be edited" in asked[-1].get("reason", ""),
+           "with a card that says why instead of nothing at all: %r"
+           % (asked[-1] if asked else None))
+        ok(len(asked) == 2,
+           "exactly one notice on top of the question — the refusal is reported, not repeated: %d"
+           % len(asked))
+
+    # The other half of the contract, and the one the refusal branch must not swallow: an app that
+    # accepts the edit reports it. Without this, `if not applied` would have looked correct while
+    # every successful replace also ran the failure path.
+    class Working:
+        def __init__(self):
+            self.edits = []
+
+        def get_editable_text_iface(self):
+            return self
+
+        def get_text_iface(self):
+            return self
+
+        def delete_text(self, start, end):
+            self.edits.append(("delete", start, end))
+
+        def insert_text(self, start, text, length):
+            self.edits.append(("insert", start, text))
+
+    working = Working()
+    client = StubClient()
+    asked = []
+    watcher = module.Watcher(client, cooldown=0.0,
+                             ask=lambda issue, pos=None: (asked.append(issue),
+                                                          {"action": "sentence", "text": "the"})[1])
+    watcher.target = working
+    watcher.unchanged = lambda *a: True
+    ok(watcher.replace(0, 3, "the") is True, "a replace the app accepted reports success")
+    ok(working.edits == [("delete", 0, 3), ("insert", 0, "the")],
+       "and it deleted then inserted, in the app's own interface: %r" % working.edits)
+    watcher.offer(0, 3, "teh", "the corrected sentence",
+                  {"old": "teh", "new": "the", "span": [0, 3]}, None)
+    ok(client.copied == [] and len(asked) == 1,
+       "so a click that works asks the question once and posts no notice: %d call(s)" % len(asked))
+
+
 def main():
     if watch is None:
         print("grammar-watch: skipped — no gi/at-spi bindings here (needs the system python, "
@@ -612,6 +710,7 @@ def main():
     test_notification(tmp)
     test_module_loading(tmp)
     test_popup(tmp)
+    test_edit_refusal(watch)
     test_listeners()
     # The live legs drive real applications on the real desktop — that is their whole value, and
     # also why they are opt-in: running the gate while someone is working types into a window and
