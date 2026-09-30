@@ -56,9 +56,9 @@ DEBUG = os.environ.get("GRAMMAR_WATCH_DEBUG") == "1"
 # its directory on the path, so a plain `import grammar_core` would fail there while working when
 # the script is run directly.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from grammar_core import (BACK, FORWARD, TAIL, add_blocked, alternatives, app_blocked, block_list,
-                          blocked_apps, first_span, others, parse_reply, shown, snippet_window,
-                          suggestions)
+from grammar_core import (BACK, FORWARD, MIN_CHARS, TAIL, add_blocked, alternatives, app_blocked,
+                          block_list, blocked_apps, first_span, others, parse_reply, shown,
+                          snippet_window, suggestions)
 
 # The file the per-app pause is kept in — beside the engine's own config, because it is the same
 # question ("what does this machine want?") asked about a different thing. One name per line, and

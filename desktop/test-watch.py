@@ -137,6 +137,22 @@ def test_blocklist():
        "and the result blocks the application that was added")
 
 
+def test_reexports():
+    """Anything this module uses that only exists in grammar_core has to be imported.
+
+    Python says nothing until the line runs, so a name that is used but never imported fails at the
+    worst possible moment: MIN_CHARS sat in check(), undefined, and every check died with a NameError
+    while the unit still reported "active" and the log quietly filled with tracebacks. A name the
+    module uses but cannot see is a bug no import-time error and no unit state can reveal.
+    """
+    import grammar_core                                     # sys.path has the script's directory
+    source = open(os.path.join(HERE, "grammar-watch.py")).read()
+    used = source.split("from grammar_core import", 1)[1]    # the module's own code
+    missing = [name for name in dir(grammar_core) if not name.startswith("_")
+               and re.search(r"\b%s\b" % name, used) and not hasattr(watch, name)]
+    ok(not missing, "every grammar_core name the watcher uses is imported: missing %r" % missing)
+
+
 def test_notification(tmp):
     stub = os.path.join(tmp, "notify-send")
     with open(stub, "w") as fh:
@@ -781,6 +797,7 @@ def main():
     test_window()
     test_suggestions()
     test_blocklist()
+    test_reexports()
     test_notification(tmp)
     test_module_loading(tmp)
     test_popup(tmp)
