@@ -191,6 +191,57 @@ def test_pause():
     ok(watched == [3600], "the card's own answer asks for an hour: %r" % watched)
 
 
+def test_pause_verbs(tmp):
+    """The way back from the card's two pause buttons, through the command that owns them.
+
+    Both of those buttons write files and neither had an undo. This is the undo, so what matters is
+    that it reports the state honestly, removes exactly the line it was asked to, and refuses to
+    pretend it has undone something that was never the user's to begin with (the defaults: password
+    managers and terminals).
+
+    Through the command rather than the function: the command is what a person has, and it is where
+    the exit codes live — a script (or a shortcut) needs to tell "done" from "nothing to undo".
+    """
+    pause = os.path.join(HERE, "grammar-pause.py")
+    config = os.path.join(tmp, "config")           # a temp config dir: never the real blocklist
+    env = dict(os.environ, XDG_CONFIG_HOME=config)
+
+    def run(*args):
+        return subprocess.run([sys.executable, pause] + list(args), capture_output=True, text=True,
+                              env=env)
+
+    first = run("--blocks")
+    ok(first.returncode == 0 and "no application is ignored" in first.stdout,
+       "with no file the state is plain and the exit is 0: %r" % first.stdout.strip())
+
+    path = os.path.join(config, "grammar-server", "blocked-apps")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as fh:
+        fh.write("firefox\ncode\n")
+    ok("ignored in: firefox, code" in run("--blocks").stdout,
+       "and it lists them in the file's own order")
+
+    back = run("--unblock", "FIREFOX")
+    ok(back.returncode == 0 and "firefox" in back.stdout.lower(),
+       "unblocking takes the line out, whatever its case: %r" % back.stdout.strip())
+    with open(path) as fh:
+        left = fh.read()
+    ok(left == "code\n", "and leaves the rest exactly as it was: %r" % left)
+
+    again = run("--unblock", "firefox")
+    ok(again.returncode == 1 and "not ignored" in again.stderr,
+       "a second attempt is an honest 'nothing of yours to undo' (exit %d)" % again.returncode)
+    default = run("--unblock", "konsole")
+    ok(default.returncode == 1 and "always spared" in default.stderr,
+       "a default is named as a default, never as something that was undone: %r"
+       % default.stderr.strip())
+    with open(path) as fh:
+        ok(fh.read() == "code\n", "and neither refusal touched the file")
+    ok(run("--unblock").returncode == 2, "a missing name is a usage error, not a silent success")
+    ok(run("--unblock", "code").returncode == 0 and not os.path.exists(path),
+       "and taking the last one out leaves no empty file behind — the pause works that way too")
+
+
 def test_finding_word():
     """What the card is allowed to offer "Ignore this word" for.
 
@@ -912,6 +963,7 @@ def main():
     test_suggestions()
     test_blocklist()
     test_pause()
+    test_pause_verbs(tmp)
     test_finding_word()
     test_ignore_route()
     test_reexports()

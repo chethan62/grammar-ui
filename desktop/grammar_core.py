@@ -223,6 +223,14 @@ def parse_payload(raw, argv=None):
 # terminal's text is commands, where "misspellings" are mostly false. The list is a plain text file
 # — one application name per line, '#' comments, because it is user data rather than config — and
 # these defaults are always in force, so the first run already spares the obvious places.
+# The file the per-app pause is kept in: beside the engine's own config, because it asks the same
+# question ("what does this machine want?") about a different thing. One name per line, and the
+# defaults below are always in force, so this starts empty and only grows by choice. Owned here rather
+# than by the watcher because the tray menu reads and rewrites it too, and two copies of a path drift.
+BLOCKED_PATH = os.path.join(
+    os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
+    "grammar-server", "blocked-apps")
+
 BLOCKED_ALWAYS = ("keepassxc", "keepass", "bitwarden", "1password", "gnome-keyring", "kwallet",
                   "konsole", "yakuake", "alacritty", "kitty", "wezterm", "foot", "xterm",
                   "gnome-terminal")
@@ -266,6 +274,23 @@ def add_blocked(text, app):
     if not name or app_blocked(name, block_list(text)):
         return text or ""
     return (text or "").rstrip("\n") + ("\n" if text else "") + name + "\n"
+
+
+def remove_blocked(text, app):
+    """A blocklist file with this application taken out.
+
+    Only the user's own lines can be removed from here, and that is the point: the defaults above are
+    deliberate (password managers, terminals) and never appear in this file, so the menu that offers
+    this can only ever offer to end a pause the user asked for. Comments survive — a person wrote
+    them — while blank lines do not: nothing in this file reads them, and leaving the gaps behind
+    would make the file look like it still had something in it.
+    """
+    name = (app or "").strip().lower()
+    if not name:
+        return text or ""
+    kept = [line for line in (text or "").splitlines()
+            if line.strip() and line.strip().lower() != name]
+    return "\n".join(kept) + ("\n" if kept else "")
 
 
 # ---- pausing the whole thing for a while ---------------------------------------------------------

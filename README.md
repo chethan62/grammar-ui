@@ -18,7 +18,7 @@ the checking happens now, and the page was a second surface to keep in step.
 | `grammar-popup.py --settings` | the AI-runner panel: which model rephrases (also in the menu as "Choose the AI runner") |
 | `grammar-doctor` | is the whole chain working? Every silent failure this product has, named with its fix |
 | `grammar-action` | `accept` / `dismiss` — what the keyboard shortcuts run |
-| `grammar-pause` | `15m` / `1h` / `off` — silence the checker for a while, or bring it back |
+| `grammar-pause` | `15m` / `1h` / `off` — silence the checker for a while, or bring it back; `--blocks` lists the applications you have ignored, `--unblock <app>` checks in one of them again |
 
 None of them needs a browser extension, and none of them reads a DOM: they read the accessibility
 bus, the same interface a screen reader uses. That is also the limit — an application that
@@ -94,6 +94,14 @@ We should arrange a meeting to discuss the report.   ← click one to replace th
   rather than a switch, so it ends by itself: nothing has to be remembered the next morning, and a
   machine that reboots comes back checking. `grammar-pause` with no argument prints the state, and
   `grammar-doctor` reports it — a checker that has gone quiet on purpose should be able to say so.
+- **Both of those answers can be taken back from a shell**, which they could not before: the card's
+  "Ignore in <application>" and "Pause for an hour" each write a file and offer no way out of it, so
+  `grammar-pause --blocks` lists what you have ignored and `grammar-pause --unblock Firefox` brings
+  checking back in one application (`--unblock` exits 1 when there was nothing of yours to undo, and
+  says which kind of nothing: a name you never added, or one of the defaults, which are always spared).
+  A command rather than an icon on purpose — see the note about tray icons in the skill's
+  `references/ui-surface.md`: Qt's tray silently registers nothing on this desktop, and an icon that
+  is never drawn is worse than no icon at all.
 - **Ignore this word** appears only when the finding is one misspelled word, because what it adds to
   is a *word* list: a phrase, a clause or a whole sentence would be a promise that cannot be kept, and
   a grammar rule that happens to span one word (`She go`) is not a spelling — the word underneath it

@@ -56,17 +56,13 @@ DEBUG = os.environ.get("GRAMMAR_WATCH_DEBUG") == "1"
 # its directory on the path, so a plain `import grammar_core` would fail there while working when
 # the script is run directly.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from grammar_core import (BACK, CARET_GAP, FORWARD, MIN_CHARS, TAIL, add_blocked, alternatives,
+from grammar_core import (BACK, BLOCKED_PATH, CARET_GAP, FORWARD, MIN_CHARS, TAIL, add_blocked, alternatives,
                           app_blocked, block_list, blocked_apps, clear_pause, finding_word,
                           first_span, others, parse_reply, paused_until, post_json, shown,
                           snippet_window, suggestions, write_pause)
 
-# The file the per-app pause is kept in — beside the engine's own config, because it is the same
-# question ("what does this machine want?") asked about a different thing. One name per line, and
-# the defaults in grammar_core are always in force, so this starts empty and only grows by choice.
-BLOCKLIST = os.path.join(
-    os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
-    "grammar-server", "blocked-apps")
+# The per-app pause file is BLOCKED_PATH, defined in grammar_core: the tray menu rewrites it too, and
+# two copies of a path drift.
 
 
 
@@ -247,7 +243,7 @@ class Watcher:
         profile.
         """
         try:
-            with open(BLOCKLIST) as fh:
+            with open(BLOCKED_PATH) as fh:
                 return block_list(fh.read())
         except OSError:
             return block_list("")
@@ -264,7 +260,7 @@ class Watcher:
             debug("the focused application will not name itself; nothing paused")
             return
         try:
-            with open(BLOCKLIST) as fh:
+            with open(BLOCKED_PATH) as fh:
                 text = fh.read()
         except OSError:
             text = ""
@@ -276,18 +272,18 @@ class Watcher:
             debug("already paused in %s" % name)
             return
         try:
-            os.makedirs(os.path.dirname(BLOCKLIST), exist_ok=True)
-            with open(BLOCKLIST, "w") as fh:
+            os.makedirs(os.path.dirname(BLOCKED_PATH), exist_ok=True)
+            with open(BLOCKED_PATH, "w") as fh:
                 fh.write(updated)
         except OSError as exc:
-            debug("could not write %s: %s" % (BLOCKLIST, exc))
+            debug("could not write %s: %s" % (BLOCKED_PATH, exc))
             return
         debug("paused in %s" % name)
         if shutil.which("notify-send"):
             subprocess.Popen(["notify-send", "-a", "grammar", "-t", "5000",
                               "Paused in %s" % name,
                               "Checking is off in this application. Delete its line from %s "
-                              "to bring it back." % BLOCKLIST])
+                              "to bring it back." % BLOCKED_PATH])
 
     def pause_for(self, seconds):
         """Silence the checker for a while — what the card's "Pause for an hour" asks for.
