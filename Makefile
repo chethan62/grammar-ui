@@ -26,6 +26,7 @@ check-app:
 	node --check app/src/main.js
 	@echo "  app: src/main.js parses"
 	node app/check.mjs
+	python3 app/check-palette.py
 	@curl -sf -o /dev/null "$${GRAMMAR_API:-http://127.0.0.1:8875}/status" 2>/dev/null || { \
 	   echo "  app: skipped the endpoint check (no engine at $${GRAMMAR_API:-http://127.0.0.1:8875})"; exit 0; }
 	@for p in /v1/ai /v2/ignore; do \
