@@ -14,15 +14,42 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Nothing to build: every script is python and stdlib, so the gate is the three scripts'
-      # own assertions. Each live leg skips itself and says so when it has no engine, no
-      # LibreOffice or no display - which is what lets this run in CI at all.
-      - name: selection checker
-        run: python3 desktop/test-lookup.py
-      - name: typing watcher
-        run: python3 desktop/test-watch.py
-      - name: doctor
-        # Safe here with no engine, no watcher unit and no accessibility bus: the test asserts that
-        # the doctor *reports* the truth (it is made to fail against a dead engine), not that this
-        # machine's chain is healthy.
-        run: python3 desktop/test-doctor.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # One command, and the same one a person runs. This step used to name three python tests
+      # individually, which meant the app's own checks — the fetch timeout, the palette against
+      # card_colors(), the endpoints the window calls — never ran here at all, while the badge read
+      # green. Running `make test` means this gate cannot check less than the gate at home, and the
+      # live legs still skip themselves with a sentence when there is no engine (as they always did).
+      - run: make test
+
+  bundle:
+    # The app exists to run on Linux and Windows from one source, and the Windows half cannot be
+    # proven from Linux — no .msi comes out of this box. What this job proves is that the app COMPILES
+    # and BUNDLES on Windows; nothing here launches it, so "builds on Windows" is the claim, and
+    # "works on Windows" still needs a person at a Windows machine.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - run: npm ci
+      - run: npm run tauri build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ runner.os }}
+          path: app/src-tauri/target/release/bundle/**
+          if-no-files-found: error
