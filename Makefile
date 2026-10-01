@@ -4,6 +4,9 @@
 UNITDIR ?= $(HOME)/.config/systemd/user
 BINDIR ?= $(HOME)/.local/bin
 APPDIR ?= $(HOME)/.local/share/applications
+# hicolor's scalable directory is where every theme looks, and the desktop asks for one file instead
+# of five: the entries' Icon=grammar-ui resolves to this.
+ICONDIR ?= $(HOME)/.local/share/icons/hicolor/scalable/apps
 
 .PHONY: all test install uninstall
 
@@ -18,8 +21,9 @@ test:
 
 # Install for the current user: no sudo, and no unit ever references a checkout.
 install:
-	install -d $(UNITDIR) $(BINDIR) $(APPDIR)
+	install -d $(UNITDIR) $(BINDIR) $(APPDIR) $(ICONDIR)
 	install -m644 deployments/systemd/grammar-watch.service $(UNITDIR)/grammar-watch.service
+	install -m644 deployments/grammar-ui.svg $(ICONDIR)/grammar-ui.svg
 	install -m755 desktop/grammar-lookup.py $(BINDIR)/grammar-lookup
 	install -m755 desktop/grammar-watch.py $(BINDIR)/grammar-watch
 	install -m755 desktop/grammar-popup.py $(BINDIR)/grammar-popup.py
@@ -51,5 +55,6 @@ uninstall:
 	rm -f $(BINDIR)/grammar-action
 	rm -f $(APPDIR)/grammar-lookup.desktop $(APPDIR)/grammar-settings.desktop
 	rm -f $(APPDIR)/grammar-accept.desktop $(APPDIR)/grammar-dismiss.desktop
+	rm -f $(ICONDIR)/grammar-ui.svg
 	-update-desktop-database $(APPDIR) 2>/dev/null
 	-systemctl --user daemon-reload

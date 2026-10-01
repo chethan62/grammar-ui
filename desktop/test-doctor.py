@@ -10,8 +10,10 @@ Run with the system python (the one with gi); it re-execs itself like the other 
 
 import importlib.util
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 
 try:
     import gi  # noqa: F401
@@ -154,10 +156,58 @@ def test_listen_row(doctor):
     ok("no answer" in detail, "it says what it asked and got nothing")
 
 
+def test_entries_check(doctor):
+    """The entries check, including the icon an entry names.
+
+    Run against a temporary tree rather than the real one: the real install is the install's business,
+    and what has to be proved here is that a missing entry is reported, that an icon which resolves
+    nowhere is reported and is only a warning (a blank menu square is not a broken suggestion chain),
+    and that a complete pair passes.
+    """
+    tmp = tempfile.mkdtemp(prefix="grammar-entries-")
+    data = os.path.join(tmp, "share")
+    old_apdir, old_data = doctor.APPDIR, os.environ.get("XDG_DATA_HOME")
+    names = ("grammar-lookup.desktop", "grammar-settings.desktop", "grammar-accept.desktop",
+             "grammar-dismiss.desktop")
+    try:
+        doctor.APPDIR = os.path.join(tmp, "applications")
+        os.makedirs(doctor.APPDIR)
+        essential, okd, detail, fix = doctor.check_entries()
+        ok(okd is False and "grammar-lookup.desktop" in detail,
+           "an empty applications directory reports the missing entries: %r" % detail)
+        ok("make install" in fix, "with the fix rather than the bare finding: %r" % fix)
+
+        for name in names:
+            with open(os.path.join(doctor.APPDIR, name), "w") as fh:
+                fh.write("[Desktop Entry]\nIcon=grammar-ui\nExec=/bin/true\n")
+        os.environ["XDG_DATA_HOME"] = data
+        essential, okd, detail, fix = doctor.check_entries()
+        ok(okd is False and "grammar-ui" in detail,
+           "an icon nothing installed is reported, by name: %r" % detail)
+        ok(essential is False,
+           "and it is a warning: a blank menu square does not stop suggestions")
+
+        icons = os.path.join(data, "icons", "hicolor", "scalable", "apps")
+        os.makedirs(icons)
+        with open(os.path.join(icons, "grammar-ui.svg"), "w") as fh:
+            fh.write("<svg/>")
+        essential, okd, detail, fix = doctor.check_entries()
+        ok(okd is True, "with the icon installed the check passes: %r" % detail)
+        ok("4 installed" in detail, "and it says how many entries it looked at: %r" % detail)
+    finally:
+        doctor.APPDIR = old_apdir
+        if old_data is None:
+            os.environ.pop("XDG_DATA_HOME", None)
+        else:
+            os.environ["XDG_DATA_HOME"] = old_data
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main():
     doctor = load()
     test_verdict(doctor)
     test_install_check(doctor)
+    test_entries_check(doctor)
     test_listen_rule(doctor)
     test_listen_row(doctor)
     test_it_can_fail()

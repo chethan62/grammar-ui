@@ -262,13 +262,47 @@ def check_card():
             "run `make install` beside the host — the card cannot load without its QML")
 
 
+def icon_candidates(name):
+    """Everywhere an icon called `name` can live for this user.
+
+    The theme machinery searches the icon directories per size and per extension, so an entry's
+    Icon= resolves when one of these exists — and resolves nowhere when nobody installed one, which
+    is a blank square in the menu. The data home is read here rather than at import time so this can
+    be pointed at a temporary tree.
+    """
+    data = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    sizes = ("scalable", "256x256", "128x128", "64x64", "48x48", "32x32", "24x24", "22x22", "16x16")
+    return [os.path.join(data, "icons", "hicolor", size, "apps", name + ext)
+            for size in sizes for ext in (".svg", ".png", ".xpm")]
+
+
 def check_entries():
-    wanted = ("grammar-lookup.desktop", "grammar-settings.desktop")
+    """The menu entries, and the icon they name.
+
+    An entry whose Icon= names a file nobody installed is silent: nothing logs, nothing fails to
+    start, the menu just draws a blank square. Same shape as the exec bit and the unimported name —
+    a reference to something that is not there — so it is checked rather than assumed.
+    """
+    wanted = ("grammar-lookup.desktop", "grammar-settings.desktop", "grammar-accept.desktop",
+              "grammar-dismiss.desktop")
     found = [name for name in wanted if os.path.exists(os.path.join(APPDIR, name))]
-    if len(found) == len(wanted):
-        return (False, True, "menu entries: %s" % ", ".join(found), "")
-    return (False, False, "menu entries missing: %s" % ", ".join(set(wanted) - set(found)),
-            "run `make install` (they live in %s)" % APPDIR)
+    if len(found) != len(wanted):
+        return (False, False, "menu entries missing: %s" % ", ".join(sorted(set(wanted) - set(found))),
+                "run `make install` (they live in %s)" % APPDIR)
+    icons = set()
+    for name in found:
+        with open(os.path.join(APPDIR, name)) as fh:
+            for line in fh:
+                if line.startswith("Icon="):
+                    icons.add(line.strip().split("=", 1)[1])
+    missing = sorted(i for i in icons
+                     if i and not any(os.path.exists(p) for p in icon_candidates(i)))
+    if missing:
+        return (False, False, "menu entries name an icon nothing installs: %s" % ", ".join(missing),
+                "run `make install` — it puts grammar-ui.svg under %s/icons/hicolor/scalable/apps"
+                % (os.environ.get("XDG_DATA_HOME") or "~/.local/share"))
+    return (False, True, "menu entries: %d installed, icon %s"
+            % (len(found), ", ".join(sorted(icons)) or "none named"), "")
 
 
 def main():
