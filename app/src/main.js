@@ -134,8 +134,6 @@ $("newWord").addEventListener("keydown", (event) => { if (event.key === "Enter")
 // not do this without repainting under the user's hands.
 window.addEventListener("focus", load);
 
-$("test").addEventListener("click", load);        // the same round trip: /v1/ai asks the backend
-
 $("save").addEventListener("click", async () => {
   $("save").disabled = true;
   say("Saving…");

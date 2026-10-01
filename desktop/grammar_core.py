@@ -444,3 +444,16 @@ def post_json(url, body, timeout=REPHRASE_TIMEOUT):
 # ---- the settings panel's view of GET /v1/ai ---------------------------------------------------
 
 
+# Restored: this was removed when the Qt surface went, because nothing was left to colour. The Tauri
+# window draws with exactly these values now, and it cannot import them — it is CSS in a webview — so
+# they live here as the one source and app/check-palette.py fails if the copy drifts.
+def card_colors(dark):
+    """The card's palette. Pure: the host decides light or dark from the desktop, and this decides
+    what that means. Keeping the colours here rather than in the QML is what makes them testable."""
+    if dark:
+        return {"surface": "#1a1f26", "chip": "#242b34", "hover": "#2c343e",
+                "border": "#2f3844", "text": "#e7eaee", "muted": "#9aa4b2", "faint": "#858f9d",
+                "accent": "#e8ebef", "accentInk": "#11151a", "accentHover": "#ffffff"}
+    return {"surface": "#ffffff", "chip": "#f4f5f7", "hover": "#eef0f3",
+            "border": "#e2e5ea", "text": "#14181d", "muted": "#5a6472", "faint": "#6b7280",
+            "accent": "#1c2127", "accentInk": "#ffffff", "accentHover": "#2c333b"}
