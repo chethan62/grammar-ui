@@ -31,6 +31,10 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
-  }
+    ],
+    "category": "Utility",
+    "shortDescription": "Settings for the grammar checker",
+    "longDescription": "The ignored words and the AI runner for grammar-server, in one window."
+  },
+  "mainBinaryName": "grammar"
 }
