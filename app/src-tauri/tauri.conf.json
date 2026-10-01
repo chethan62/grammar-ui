@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "grammar-ui",
+  "productName": "Grammar",
   "version": "0.1.0",
   "identifier": "com.chethan62.grammar-ui",
   "build": {
