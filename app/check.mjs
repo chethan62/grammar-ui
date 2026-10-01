@@ -55,16 +55,38 @@ if (emojiText.slice(17, 20) !== "teh") throw new Error("offsets do not slice the
 
 const shape = {
   matches: [
-    { message: "Possible typo", offset: 17, length: 3, replacements: ["the"], rule: { id: "MORFOLOGIK_RULE_EN_US" } },
+    // The engine's real shape: replacements are objects carrying `value`, taken from a live response.
+    { message: "Possible typo", offset: 17, length: 3,
+      replacements: [{ value: "the" }], rule: { id: "MORFOLOGIK_RULE_EN_US" } },
     { message: "Possible typo", offset: 25, length: 3, replacements: [], rule: { id: "MORFOLOGIK_RULE_EN_US" } },
+    // and a plain string, which clients written against other LanguageTool servers send back
+    { message: "Possible typo", offset: 25, length: 3,
+      replacements: ["they"], rule: { id: "MORFOLOGIK_RULE_EN_US" } },
   ],
 };
 const modelRows = findingsFrom(shape, emojiText);
-if (modelRows.length !== 2) throw new Error(`expected 2 rows, got ${modelRows.length}`);
+if (modelRows.length !== 3) throw new Error(`expected 3 rows, got ${modelRows.length}`);
 if (modelRows[0].before !== "teh" || modelRows[0].after !== "the") throw new Error("row 0 text is wrong");
 if (modelRows[1].after !== null) throw new Error("a finding with no replacements must have after === null");
+// the bug that shipped: an object read as a string renders as "[object Object]" on every button
+if (modelRows[0].after !== "the") throw new Error(`replacement object not read: got ${modelRows[0].after}`);
+if (modelRows[2].after !== "they") throw new Error(`string replacement not read: got ${modelRows[2].after}`);
 if (findingsFrom({}, emojiText).length !== 0) throw new Error("a response with no matches must be no rows");
 if (findingsFrom({ matches: [{ message: "x", offset: 9999, length: 4, replacements: [] }] }, emojiText).length !== 1) {
   throw new Error("an out-of-range offset must still be a row, not a crash");
 }
 console.log("  app: the finding model holds (UTF-16 offsets, empty replacements, out-of-range)");
+
+// --- the debounce bands -----------------------------------------------------------------------------
+// Ported from grammar_core.debounce_ms, whose docstring explains them. The boundaries are the whole risk
+// in a port (39 vs 40, 249 vs 250), so every one of them is asserted, and null is separately asserted
+// because "nothing measured yet" is not "fast".
+const dStart = source.indexOf("function debounceMs(");
+if (dStart < 0) throw new Error("debounceMs() is gone from src/main.js");
+const dBody = source.slice(dStart, source.indexOf("\n}\n", dStart) + 3);
+const debounceMs = new Function(`${dBody}\nreturn debounceMs;`)();
+for (const [input, want] of [[null, 600], [0, 300], [39, 300], [40, 900], [249, 900], [250, 1500], [10000, 1500]]) {
+  const got = debounceMs(input);
+  if (got !== want) throw new Error(`debounceMs(${input}) = ${got}, expected ${want}`);
+}
+console.log("  app: the debounce bands match grammar_core.debounce_ms at every boundary");

@@ -112,8 +112,15 @@ section[role=tabpanel] h2.caption:first-child { margin-top:0; }
 textarea { font:inherit; font-size:var(--t-body); color:var(--text); background:var(--chip);
            border:1px solid var(--border); border-radius:var(--radius); padding:8px 10px; width:100%;
            min-height:96px; resize:vertical; line-height:1.5; }
-.finding, .candidate { align-items:flex-start; gap:var(--s2); padding:var(--s1) 0; }
+/* wrap: three actions and a message do not fit a 460px window on one line, and the message is the
+   part worth reading. */
+.finding, .candidate { align-items:flex-start; gap:var(--s2); padding:var(--s1) 0; flex-wrap:wrap; }
 .finding span, .candidate span { flex:1; overflow-wrap:anywhere; }
 .finding button, .candidate button { flex:0 0 auto; }
 .finding + .finding, .candidate + .candidate { border-top:1px solid var(--border); }
 #candidates { margin-top:var(--s2); }
+
+/* Visually hidden but announced: the live region the explicit Check writes to, so typing does not
+   narrate a count on every keystroke. */
+.sr-only { position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden;
+           clip-path:inset(50%); white-space:nowrap; border:0; }
