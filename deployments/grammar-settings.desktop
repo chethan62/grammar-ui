@@ -1,11 +1,11 @@
 [Desktop Entry]
 Type=Application
-Name=Choose the AI runner
-GenericName=Rephrase backend
-Comment=Which model rephrases your sentences: Ollama, llama.cpp, LM Studio, vLLM, OpenRouter
+Name=Settings
+GenericName=Grammar checker settings
+Comment=What the checker skips and which model rephrases: ignored words, paused applications, the pause, the AI runner
 Exec=@BINDIR@/grammar-popup.py --settings
 Icon=grammar-ui
 Terminal=false
 Categories=Utility;TextTools;
-Keywords=grammar;rewrite;rephrase;ollama;llama;lmstudio;vllm;openrouter;ai;
+Keywords=grammar;check;settings;ignore;pause;rewrite;rephrase;ollama;llama;lmstudio;vllm;openrouter;ai;
 StartupNotify=false
