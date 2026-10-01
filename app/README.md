@@ -15,6 +15,14 @@ npm run tauri build      # .deb/.rpm/.AppImage here, .msi/NSIS on Windows
 
 Set `localStorage["grammar-api"]` if the engine is somewhere else.
 
+**The AppImage does not build on this machine, and that is the machine's doing.** linuxdeploy walks the
+dependencies of the system WebKitGTK stack with its own old `strip`, which cannot read the `.relr.dyn`
+section these new libraries use (`NO_STRIP=1` silences that step), and then trips over a *different* app's
+private copy of glib under `/usr/lib/openshot`. On a clean runner neither happens: CI builds the AppImage
+and the Windows bundles, so `npm run tauri build` here is for the deb and the rpm. Measured sizes: deb
+2.4 MB, AppImage 81 MB (the GTK plugin bundles the whole WebKitGTK stack, which the deb depends on
+instead), Windows 2.1 MB msi + 1.4 MB installer.
+
 **`WEBKIT_DISABLE_DMABUF_RENDERER=1` is not optional on this box and is set in `lib.rs`.** Without it the
 webview paints nothing: measured as a window filled with a single colour and
 `Failed to create GBM buffer of size 460x760` on stderr, with `10de:1f99, driver (null)` in the GL log.
