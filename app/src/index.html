@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Grammar settings</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="head">
+    <div class="title">Settings</div>
+    <div class="right"><span class="dot" id="dot"></span><span id="state">reading…</span></div>
+  </div>
+
+  <div class="caption">Ignored words</div>
+  <div id="words"></div>
+  <p class="note" id="wordsNote">The engine stops reporting these; removing one brings the findings back.</p>
+  <hr class="rule">
+
+  <div class="caption">AI settings</div>
+  <p class="note muted">Which model rephrases your sentences. Checking your writing works either way —
+     this affects Rephrase only, and the choice survives a restart.</p>
+
+  <div class="caption">Runner</div>
+  <div class="field"><select id="provider"></select></div>
+  <p class="note" id="providerNote"></p>
+
+  <div class="caption">Address</div>
+  <div class="field"><input id="url" spellcheck="false"></div>
+  <p class="note">The base URL of the server, no /v1 needed at the end.</p>
+
+  <div class="caption">Model</div>
+  <div class="field"><input id="model" list="models" spellcheck="false"></div>
+  <datalist id="models"></datalist>
+  <p class="note" id="modelNote">What this server reports, or type any model name.</p>
+
+  <div class="foot">
+    <div class="status" id="status"></div>
+    <button id="test">Test</button>
+    <button class="primary" id="save">Save</button>
+  </div>
+
+  <!-- No module loader needed: the script imports nothing, and this also lets the same files be opened
+       over file:// for a quick look outside the Tauri shell. -->
+  <script defer src="main.js"></script>
+</body>
+</html>

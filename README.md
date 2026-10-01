@@ -4,11 +4,12 @@ The desktop side of [grammar-server](https://github.com/chethan62/grammar-server
 checker and a typing watcher. **Python and stdlib — nothing to build, no browser, no
 dependencies.**
 
-There was a browser UI here, and then a suggestion card that appeared at the caret and a settings
-window beside it. Both were removed at the user's request: the card was a Qt surface with its own
-process, its own gate and its own two-window focus problem, and what is left does the checking
-without it. This repo no longer contains a single line of UI code — no QML, no PySide6 — and the
-removed work is in the history if it is ever wanted back.
+There was a browser UI here, then a suggestion card at the caret with a settings window beside it, and
+now a Tauri app in [`app/`](app/). The Qt card was removed at the user's request; what replaced the
+settings half of it is a webview window that runs on Linux and Windows from one source, since the
+settings surface needs no caret placement and no window-manager tricks. The checking itself — the
+selection tool and the typing watcher below — never had a UI in this repo and still does not: they
+report through notifications and a dialog.
 
 ## What is here
 

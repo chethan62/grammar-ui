@@ -1,0 +1,55 @@
+/* The ten tokens are grammar_core.card_colors(), the palette the product already used, so this window
+   and the notification text cannot drift apart. Dark follows the desktop (prefers-color-scheme) rather
+   than a toggle: this is a normal window, and the OS already knows which one the user wants. */
+:root {
+  --surface:#ffffff; --chip:#f4f5f7; --hover:#eef0f3; --border:#e2e5ea;
+  --text:#14181d; --muted:#5a6472; --faint:#6b7280;
+  --accent:#1c2127; --accentInk:#ffffff; --accentHover:#2c333b;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface:#1a1f26; --chip:#242b34; --hover:#2c343e; --border:#2f3844;
+    --text:#e7eaee; --muted:#9aa4b2; --faint:#858f9d;
+    --accent:#e8ebef; --accentInk:#11151a; --accentHover:#ffffff;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 14px; background: var(--surface); color: var(--text);
+  font-family: "Inter", "Noto Sans", system-ui, sans-serif; font-size: 12px;
+}
+.head { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+.title { font-size:17px; font-weight:600; }
+.right { display:flex; align-items:center; gap:8px; color:var(--muted); }
+.dot { width:7px; height:7px; border-radius:50%; background:var(--faint); display:inline-block; margin-right:5px; }
+.dot.up { background:#2f9e5f; } .dot.down { background:#c0563f; }
+
+.caption { color:var(--faint); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase;
+           margin:14px 0 6px; font-weight:600; }
+.rule { border:0; border-top:1px solid var(--border); margin:14px 0 0; }
+.note { color:var(--faint); font-size:11px; line-height:1.45; margin:8px 0 0; }
+.note.muted { color:var(--muted); }
+
+.row { display:flex; align-items:center; justify-content:space-between; padding:5px 0; }
+.row span { padding:1px 2px; overflow-wrap:anywhere; }
+
+button { font:inherit; font-size:12.5px; color:var(--text); background:var(--chip);
+         border:1px solid var(--border); border-radius:7px; padding:5px 11px; cursor:pointer;
+         transition:background-color 90ms ease; }
+button:hover:not(:disabled) { background:var(--hover); }
+button.flat { background:transparent; border-color:transparent; }
+button.primary { background:var(--accent); color:var(--accentInk); border-color:transparent; font-weight:600; }
+button.primary:hover:not(:disabled) { background:var(--accentHover); }
+button:disabled { opacity:.55; cursor:default; }
+
+select, input { font:inherit; font-size:12.5px; color:var(--text); background:var(--chip);
+                border:1px solid var(--border); border-radius:7px; padding:7px 10px; width:100%; }
+/* WebKitGTK draws a `select`'s own text with the native theme, so the `color` above is ignored and the
+   value comes out dark-on-dark in this palette. Taking the native appearance off makes it ours — and
+   then the arrow has to be drawn, or it stops looking like a select. */
+select { appearance:none; -webkit-appearance:none; padding-right:28px; background-repeat:no-repeat;
+         background-position:right 9px center;
+         background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%236b7280' stroke-width='1.6'/%3E%3C/svg%3E"); }
+.field { margin-top:4px; }
+.foot { display:flex; align-items:center; gap:6px; margin-top:14px; }
+.foot .status { flex:1; color:var(--muted); line-height:1.35; }
