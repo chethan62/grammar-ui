@@ -44,6 +44,12 @@ Window {
     property var changes: []         // what each alternative changed: [[removed, added], ...]
     property string streaming: ""    // the model's words, arriving, before the answers do
     property var settings: ({})      // GET /v1/ai, through the host
+
+    // A settings window left open while something else changed the state — a card's "Ignore this word",
+    // a `grammar-pause` from a shortcut — would be showing a list that is no longer true. Reloading when
+    // it regains the keyboard is the cheapest honest refresh, and it lands exactly when someone is about
+    // to read it. The finding view never becomes active, on purpose, so this cannot fire there.
+    onActiveChanged: if (active && view === "settings") bridge.loadSettings()
     property string view: "finding"  // "finding" | "settings"
     property string status: ""
     property bool busy: false
