@@ -242,6 +242,71 @@ def test_pause_verbs(tmp):
        "and taking the last one out leaves no empty file behind — the pause works that way too")
 
 
+def test_every_pause_names_its_way_back():
+    """Both of the card's "make it stop" buttons must say how to undo it, in the toast they raise.
+
+    The toast is the only place a person is told, at the moment they click, that they can have it
+    back — and a toast naming a file they would have to find is a worse answer than the command that
+    lives one line away. This check reads the source rather than driving the toast, and says so: the
+    blocklist toast fires from `pause_here()`, which asks the focused application for its name first
+    and so needs a real accessibility bus. A source check is weaker than a behavioural one and is
+    honest about being exactly that — it catches the regression that happened here (the command was
+    added, the toast kept naming only the file).
+    """
+    with open(os.path.join(HERE, "grammar-watch.py")) as fh:
+        source = fh.read()
+    ok("`grammar-pause --unblock %s`" in source,
+       "the per-app pause toast names the command that undoes it, not just the file")
+    ok("`grammar-pause off`" in source, "as the whole-checker pause already did")
+    ok("delete the line from %s" in source,
+       "and the word-ignore toast still names the engine's file, because no command changes it")
+
+
+def test_a_refused_click_says_so():
+    """A button that cannot work has to say so — this one used to do nothing at all.
+
+    The engine accepts the ignore list only from its own machine, so a card on a LAN client asking to
+    ignore a word is refused. That path wrote to a debug line nobody reads, which left a button that
+    silently did nothing — the exact failure this product exists to complain about.
+    """
+    class Recorder:
+        def __init__(self):
+            self.calls = []
+
+        def Popen(self, argv, **kw):
+            self.calls.append(argv)
+
+    recorder = Recorder()
+    real_post, real_shutil, real_subprocess = watch.post_json, watch.shutil, watch.subprocess
+    watch.shutil = type("S", (), {"which": staticmethod(lambda name: "/usr/bin/notify-send")})
+    watch.subprocess = recorder
+    w = watch.Watcher.__new__(watch.Watcher)
+    w.client = type("C", (), {"API": "http://192.168.29.5:8875"})()
+    try:
+        watch.post_json = lambda url, body: (
+            403, {"message": "the ignore list can only be changed on the machine the server runs on"})
+        w.ignore_word("zorbulating")
+        ok(len(recorder.calls) == 1, "a refusal raises a toast instead of nothing: %r" % recorder.calls)
+        joined = " ".join(recorder.calls[0]) if recorder.calls else ""
+        ok("Could not ignore" in joined, "which says what failed: %r" % joined)
+        ok("only be changed on the machine" in joined,
+           "and why, in the server's own words: %r" % joined)
+
+        recorder.calls = []
+        watch.post_json = lambda url, body: (0, {"message": "cannot reach the engine at http://x"})
+        w.ignore_word("zorbulating")
+        ok(len(recorder.calls) == 1 and "cannot reach" in " ".join(recorder.calls[0]),
+           "an unreachable engine is reported the same way: %r" % recorder.calls)
+
+        recorder.calls = []
+        watch.post_json = lambda url, body: (200, {"ignored": 1, "path": "/tmp/ignored-words"})
+        w.ignore_word("zorbulating")
+        ok(len(recorder.calls) == 1 and "Ignoring" in " ".join(recorder.calls[0]),
+           "while a word that worked is not reported as a failure: %r" % recorder.calls)
+    finally:
+        watch.post_json, watch.shutil, watch.subprocess = real_post, real_shutil, real_subprocess
+
+
 def test_finding_word():
     """What the card is allowed to offer "Ignore this word" for.
 
@@ -965,6 +1030,8 @@ def main():
     test_pause()
     test_pause_verbs(tmp)
     test_finding_word()
+    test_every_pause_names_its_way_back()
+    test_a_refused_click_says_so()
     test_ignore_route()
     test_reexports()
     test_notification(tmp)

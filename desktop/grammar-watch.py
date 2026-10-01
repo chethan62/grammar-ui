@@ -282,8 +282,8 @@ class Watcher:
         if shutil.which("notify-send"):
             subprocess.Popen(["notify-send", "-a", "grammar", "-t", "5000",
                               "Paused in %s" % name,
-                              "Checking is off in this application. Delete its line from %s "
-                              "to bring it back." % BLOCKED_PATH])
+                              "Checking is off in this application. `grammar-pause --unblock %s` "
+                              "brings it back (or delete its line from %s)." % (name, BLOCKED_PATH)])
 
     def pause_for(self, seconds):
         """Silence the checker for a while — what the card's "Pause for an hour" asks for.
@@ -322,7 +322,15 @@ class Watcher:
             return
         status, answer = post_json(base + "/v2/ignore", {"word": word})
         if status != 200:
+            # Not a debug line: the engine refuses this from anywhere but its own machine (the list is
+            # the engine's, so a LAN client adding to it would change what everyone else sees), and a
+            # click that does nothing at all is the failure this whole product is against. The
+            # server's own sentence says why — show it.
             debug("the engine refused to ignore %r: %s" % (word, answer.get("message") or status))
+            if shutil.which("notify-send"):
+                subprocess.Popen(["notify-send", "-a", "grammar", "-t", "8000",
+                                  "Could not ignore “%s”" % word,
+                                  answer.get("message") or "the engine refused it (HTTP %s)" % status])
             return
         debug("ignoring %r (%s words now)" % (word, answer.get("ignored")))
         if shutil.which("notify-send"):
