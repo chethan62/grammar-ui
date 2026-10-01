@@ -172,10 +172,14 @@ apps publish nothing without `--force-renderer-accessibility`, so "anywhere" is 
 | `desktop/test-doctor.py` | every silent failure the doctor names |
 | `desktop/test-lookup.py` | the selection checker |
 
-Live legs are opt-in (`GRAMMAR_LIVE=1`) and every one of them prints why it skipped. They assert *two*
-things about an element now: that it is in the accessibility tree **and** that its screen extents are
-non-zero — because an item inside a collapsed list is still found by name and still reports an action,
-which is exactly how two empty lists once passed every assertion in this file.
+Live legs are opt-in (`GRAMMAR_LIVE=1`) and every one of them prints why it skipped. The panel leg
+asserts that the panel's **height follows its rows** — 845 px with eight words, 739 px with one. That
+is not a taste: two lists once rendered empty behind every passing assertion, and neither the rows'
+extents nor their position detects it. Measured on the broken build, a row inside a collapsed list
+still reported `103x26` at a plausible spot *inside* its window, so an extents check added for that
+purpose was passing on the bug it was written for. The window's own size was the only property that
+differed, so it is the one asserted — and the assertion was proved by putting the bug back and
+watching it fail before it was trusted.
 
 ```bash
 make test                                        # the gates that run anywhere
@@ -185,8 +189,15 @@ GRAMMAR_LIVE=1 /usr/bin/python3 desktop/test-popup-place.py    # + the ones that
 ## 9. Deliberately not built
 
 - **A tray icon.** Impossible on this desktop and it fails silently; measured, documented, not rebuilt.
-- **A whole-panel scroll.** Only the lists grow, so only they scroll; if the *fixed* content alone ever
-  exceeds a screen, the panel needs its content to scroll — it does not today.
+- **A whole-panel scroll.** Only the lists grow, so only they scroll. Measured, though, the panel is
+  **709 px tall with nothing in the lists at all** — so on a screen shorter than that the lists have
+  nothing left to give, and `clamp()` can only push the footer, with Save on it, off one edge. The fix
+  is one scroll area around the whole panel (or smaller fixed content), not more tuning of the list cap.
+  Not built: the display this runs on has the room. The assertion that would drive it is already
+  available — `PLACED … size WxH` read against a scaled screen (`QT_SCALE_FACTOR`), which is how the
+  709 was measured. A live leg doing exactly that was written and removed again: Qt's `offscreen`
+  platform is the only way to fake a small screen here (no Xvfb, no sudo), and its software renderer
+  segfaults the panel the moment a list has a scrollbar to draw.
 - **A resident card process.** One process per suggestion costs ~586 ms before the card is visible
   (measured: 10 ms interpreter, 120 ms PySide6 import, ~420 ms Qt start-up and window map; QML
   compilation is ~0, which was checked and is a dead end). It is the largest user-felt cost left. The

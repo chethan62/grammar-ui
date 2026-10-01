@@ -1073,6 +1073,27 @@ def test_live_the_panel_lists_and_removes():
                 return app
         return None
 
+    def window_height(pid):
+        """The panel window's own height, from the X server.
+
+        This is the instrument that tells a rendered list from a collapsed one. It was found by measuring
+        both builds rather than trusting the obvious property: a row inside a list that had collapsed to
+        zero height still reports 103x26 at a plausible spot inside the window, so extents and position
+        are both blind to it — both said "fine" on the broken build. The window's height said 845 px
+        with eight words against 709 with one, because the height follows the rows.
+        """
+        try:
+            wid = subprocess.run(["xdotool", "search", "--pid", str(pid)], capture_output=True,
+                                 text=True).stdout.split()[-1]
+            geo = subprocess.run(["xdotool", "getwindowgeometry", wid], capture_output=True,
+                                 text=True).stdout
+            for line in geo.splitlines():
+                if "Geometry:" in line:
+                    return int(line.split(":")[1].strip().split("x")[1])
+        except Exception:
+            return None
+        return None
+
     proc = None
     try:
         code, answer = ask(words[0])
@@ -1099,14 +1120,7 @@ def test_live_the_panel_lists_and_removes():
            "the panel lists all %d words, including the last one (%r)" % (len(words), last))
         if button is None:
             return
-        # Being in the tree is not being on screen: an item inside a list that collapsed to zero height
-        # is still found by name and still reports an action. Two lists were rendered empty that way
-        # while every assertion above passed, so the first row's own extents are measured here.
         ok(seen is not None, "the panel's first row is in the tree too")
-        rect = seen.get_component_iface().get_extents(Atspi.CoordType.SCREEN) if seen is not None else None
-        ok(rect is not None and rect.width > 4 and rect.height > 4,
-           "and it is really drawn, not merely in the tree: %s"
-           % ("%dx%d" % (rect.width, rect.height) if rect is not None else "nothing"))
         iface = button.get_action_iface()
         names = [iface.get_action_name(i) for i in range(iface.get_n_actions())]
         iface.do_action(names.index("Press") if "Press" in names else 0)
@@ -1116,6 +1130,32 @@ def test_live_the_panel_lists_and_removes():
            "pressing it took the word off the engine's list: %r" % (listed,))
         ok(len(listed) == len(words) - 1,
            "and only that one, out of the %d: %r" % (len(words), listed))
+        # Being in the tree is not being on screen. Two lists once rendered empty — the ScrollView was
+        # bound to `contentItem`, its own Flickable container, which is 0 high for a Column child — while
+        # every name-based assertion above passed against them. Neither the rows' extents nor their
+        # position detects that; both were measured on the broken build and both said "fine". The
+        # window's own height is not blind to it: 845 px with eight words against 709 with one, because
+        # the height follows the rows. That is what this asserts, measured the same way it was found.
+        rows_h = window_height(proc.pid)
+        for word in words[1:]:
+            forget(word)                      # down to one, well under the list's cap: nothing scrolls
+        proc.kill()
+        proc.wait(timeout=5)
+        proc = subprocess.Popen([sys.executable, POPUP, "--settings"], stdin=subprocess.DEVNULL,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
+        one_h, deadline = None, time.time() + 15
+        while one_h is None and time.time() < deadline:
+            if node_named(app_for(proc.pid), "Allow " + words[0]) is not None:
+                time.sleep(1.5)               # the window is sized a beat after its rows appear
+                one_h = window_height(proc.pid)
+            if one_h is None:
+                time.sleep(0.4)
+        if rows_h is None or one_h is None:
+            print("  live panel: skipped the height check (no window geometry to read here)")
+        else:
+            ok(rows_h - one_h > 60,
+               "and the height follows its rows — %d px with %d words, %d px with one; a collapsed list "
+               "is the same height for either" % (rows_h, len(words), one_h))
     finally:
         if proc is not None:
             if proc.poll() is None:
