@@ -525,9 +525,9 @@ def document(app, depth=0):
 def editable_texts(app, out=None, depth=0):
     """Every object under this app holding editable text: Text to read the caret, EditableText
     to put a fix back. Walked by interface, not by role, because the roles differ by toolkit
-    (LibreOffice's document is a "paragraph", Kate's is a "text").
+    (LibreOffice's document is a "paragraph", a Qt text view's is a "text").
 
-    This returns all of them rather than the first: Kate exposes an editable *label* (its
+    This returns all of them rather than the first: a Qt app exposes an editable *label* (its
     status bar) as well as the editor, and taking the first meant this leg drove the status
     bar while claiming to test the editor. The caller picks by role and says which it got.
     """
@@ -567,30 +567,48 @@ def editable_text(app, prefer=("text", "paragraph")):
     return found[0] if found else None
 
 
-def start_kate():
-    """Start Kate and wait for its text view. Returns (app, process) or (None, reason).
+QT_HOST = """
+import sys
+from PySide6.QtWidgets import QApplication, QTextEdit
+app = QApplication(sys.argv)
+app.setApplicationName("grammar-test-host")
+edit = QTextEdit()
+edit.setWindowTitle("grammar test host")
+edit.resize(520, 260)
+edit.show()
+app.exec()
+"""
 
-    Not systemd-run, which is how the LibreOffice leg starts soffice: a systemd-run --user
-    unit for Kate exits within milliseconds on this box (measured twice, displays passed
-    through with --setenv), while the same command launched directly starts it and it
-    appears on the accessibility bus immediately. The reason the two behave differently is
-    not established, so this leg does not pretend to know it.
+
+def find_app_pid(pid):
+    """The accessibility app object for a process this test started itself."""
+    desktop = Atspi.get_desktop(0)
+    for i in range(desktop.get_child_count()):
+        app = desktop.get_child_at_index(i)
+        if app is not None and app.get_process_id() == pid:
+            return app
+    return None
+
+
+def start_qt_editor():
+    """Start a throwaway Qt text editor, and wait for the document view the leg needs.
+
+    This leg is about a *Qt* app publishing accessibility text, so the host has to be Qt: LibreOffice
+    would only repeat the leg next to this one. It used to be Kate — the user's own editor, which this
+    test then killed with `pkill -x kate` at the end, so running the suite could take an editor away
+    mid-edit. This host is started and killed by pid, so it cannot reach anything the user has open,
+    and it is nobody's stand-in: it is the toolkit the promise is about.
     """
-    if not shutil.which("kate"):
-        return None, "no kate on PATH"
-    proc = subprocess.Popen(["kate", "--startanon", "--new"],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                            start_new_session=True)
+    proc = subprocess.Popen([sys.executable, "-c", QT_HOST], stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL, start_new_session=True)
     for _ in range(30):
         time.sleep(1)
-        app = find_app("kate")
+        app = find_app_pid(proc.pid)
         if app is not None and editable_text(app) is not None:
             return app, proc
-        if proc.poll() is not None and app is None:
-            return None, "kate exited immediately (exit %s)" % proc.returncode
-    if find_app("kate") is None:
-        return None, "kate started but never appeared on the accessibility bus"
-    return None, "kate is on the bus but exposes no editable text object"
+        if proc.poll() is not None:
+            return None, "the Qt host exited immediately (exit %s)" % proc.returncode
+    return None, "the Qt host started but exposed no editable text object"
 
 
 def start_libreoffice():
@@ -653,12 +671,14 @@ def test_live_qt():
     caret's text object in a Qt app, read its sentence, and put a fix back through the app's
     own interface?
     """
-    app, proc = start_kate()
+    proc = None
+    app, why = start_qt_editor()
     try:
         if app is None:
             # Never a silent pass: say which of the reasons it was.
-            print("  qt: skipped (%s)" % proc)
+            print("  qt: skipped (%s)" % why)
             return
+        proc = why
         doc = editable_text(app)
         role = doc.get_role_name()
         # Which object this leg drove is part of the result, not a detail: taking the first
@@ -695,7 +715,9 @@ def test_live_qt():
     finally:
         if proc is not None:
             proc.terminate()
-        subprocess.run(["pkill", "-x", "kate"], capture_output=True)
+        if proc is not None and proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=5)
 
 
 def test_live_payload():
@@ -736,14 +758,16 @@ def test_live_payload():
         def __getattr__(self, name):
             return getattr(self._doc, name)
 
-    app, why = start_kate()
+    proc = None
+    app, why = start_qt_editor()
     if app is None:
         print("  payload: skipped (%s)" % why)
         return
+    proc = why
     try:
         doc = editable_text(app)
         if doc.get_role_name() not in ("text", "paragraph"):
-            print("  payload: skipped (no document view in kate: %r)" % doc.get_role_name())
+            print("  payload: skipped (no document view in the Qt host: %r)" % doc.get_role_name())
             return
         sentence = "We are zorbulating the report today."
         write(doc, sentence)
@@ -753,7 +777,7 @@ def test_live_payload():
                                 ask=lambda issue, pos=None, **k: (seen.append(issue),
                                                                   {"action": "", "text": ""})[1])
         watcher.target = Focused(doc)
-        watcher.app_name = lambda obj=None: "kate"   # the bus's focused app is not kate
+        watcher.app_name = lambda obj=None: "grammar-test-host"   # the bus's focused app is not it
         watcher.check()
 
         if not seen:
@@ -769,7 +793,8 @@ def test_live_payload():
         span = issue.get("span") or []
         ok(span and sentence[span[0]:span[0] + (span[1] - span[0])] == "zorbulating",
            "with a span that points at it, so a chip replaces the right words: %r" % (span,))
-        ok(issue.get("app") == "kate", "and the application, for the pause button: %r" % issue.get("app"))
+        ok(issue.get("app") == "grammar-test-host",
+           "and the application, for the pause button: %r" % issue.get("app"))
         ok(issue.get("badge", "").startswith("Rules engine"),
            "and where the finding came from: %r" % issue.get("badge"))
         # The sentence sent to a model is the *corrected* one, deliberately: handing a small model
@@ -781,7 +806,9 @@ def test_live_payload():
         ok(not issue.get("more"),
            "and 'more' is empty when there is only one suggestion: %r" % issue.get("more"))
     finally:
-        subprocess.run(["pkill", "-x", "kate"], capture_output=True)
+        if proc is not None and proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=5)
 
 
 def test_module_loading(tmp):
