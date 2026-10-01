@@ -13,10 +13,24 @@ ICONDIR ?= $(HOME)/.local/share/icons/hicolor/scalable/apps
 all:
 	@echo "Nothing to build. Try: make test | make install"
 
-test:
+test: check-app
 	python3 desktop/test-lookup.py
 	python3 desktop/test-watch.py
 	python3 desktop/test-doctor.py
+
+# The app's own check. It parses the JS, then asks the engine for the two endpoints the UI calls: a
+# renamed or removed endpoint leaves a window that says "not answering" and nothing else, and that is
+# worth catching before a user does. Skips (does not fail) when no engine is running, because a machine
+# without one cannot tell a moved endpoint from a stopped engine.
+check-app:
+	node --check app/src/main.js
+	@echo "  app: src/main.js parses"
+	@curl -sf -o /dev/null "$${GRAMMAR_API:-http://127.0.0.1:8875}/status" 2>/dev/null || { \
+	   echo "  app: skipped the endpoint check (no engine at $${GRAMMAR_API:-http://127.0.0.1:8875})"; exit 0; }
+	@for p in /v1/ai /v2/ignore; do \
+	   if curl -sf -o /dev/null "$${GRAMMAR_API:-http://127.0.0.1:8875}$$p"; then echo "  app: $$p answers"; \
+	   else echo "  app: $$p DID NOT ANSWER — the UI calls it"; exit 1; fi; \
+	 done
 
 # Install for the current user: no sudo, and no unit ever references a checkout.
 install:
