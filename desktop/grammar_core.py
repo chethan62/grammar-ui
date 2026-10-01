@@ -532,6 +532,31 @@ def api_error_message(response, status=0):
     return "the backend did not answer"
 
 
+def ai_note(provider, model, local, ms=None):
+    """Where a rephrase goes, or went — one sentence for both moments.
+
+    It is the same question either way, so it gets the same answer: *before* the click, from the
+    engine's own /v1/ai (which backend is configured, and whether the text leaves this machine) and
+    *after* it, from the rewrite's own answer (which model actually replied, and how long it took).
+    The wording matches the settings panel's on purpose — two surfaces disagreeing about whether your
+    text leaves the machine would be worse than either one alone.
+
+    `local` is None when it is not known, and then the note names the backend without saying where the
+    text goes: this is the one line in the product that must not guess.
+    """
+    provider = (provider or "").strip()
+    if not provider:
+        return ""
+    model = (model or "").strip()
+    who = "%s · %s" % (provider, model) if model else provider
+    if ms:
+        who += " · %d ms" % round(ms)
+    if local is None:
+        return who
+    where = "nothing leaves this machine" if local else "what you rephrase leaves this machine"
+    return "%s — %s" % (who, where)
+
+
 def post_json(url, body, timeout=REPHRASE_TIMEOUT):
     """POST, and read the JSON back either way: an error body is the instruction to show."""
     request = urllib.request.Request(

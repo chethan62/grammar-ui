@@ -83,6 +83,14 @@ We should arrange a meeting to discuss the report.   ← click one to replace th
   returns through the UI thread, because Qt is not thread-safe either and a frozen card is worse than a
   card. The sentence sent is the **corrected** one: handing a small model your own errors invites
   it to preserve them.
+- **The card says where a rephrase goes, before you click.** The line under the Rephrase button
+  reads `Rephrase: ollama · qwen2.5:1.5b — nothing leaves this machine`, asked of the engine's own
+  `/v1/ai` when the card opens; after a rephrase it becomes the model that actually answered and how
+  long it took, from the rewrite's own response. The wording is the settings panel's, deliberately —
+  two surfaces disagreeing about whether your text leaves the machine would be worse than either one
+  alone — and when the engine cannot say, the line names the backend and drops the claim rather than
+  guess. `GRAMMAR_POPUP_DEBUG=1` prints both writes to stderr (never stdout, which is the card's
+  answer channel).
 - The card **never takes focus**, so typing continues while it is up. That is also why it receives no
   key events of its own: Enter and Escape arrive from the desktop's shortcut system instead, through
   `grammar-action` (below). Clicking stays the interaction that needs no setup.

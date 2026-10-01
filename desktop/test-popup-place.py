@@ -345,6 +345,69 @@ def test_settings(popup):
        "and the model field and the read-only flag reach the panel")
 
 
+def test_provider_note(popup):
+    """Where a rephrase goes, said about the model that answers — and never guessed.
+
+    A card that says "nothing leaves this machine" over a cloud backend is the worst lie this product
+    could tell, so the wording is asserted here rather than trusted to the panel and the card agreeing
+    by luck.
+    """
+    ok(popup.ai_note("ollama", "qwen2.5:1.5b", True)
+       == "ollama · qwen2.5:1.5b — nothing leaves this machine",
+       "a local backend says so in the engine's own words: %r" % popup.ai_note("ollama", "m", True))
+    ok(popup.ai_note("openrouter", "gpt-4o-mini", False)
+       == "openrouter · gpt-4o-mini — what you rephrase leaves this machine",
+       "and a cloud one says the other thing, not nothing")
+    ok(popup.ai_note("ollama", "qwen2.5:1.5b", True, 1713)
+       == "ollama · qwen2.5:1.5b · 1713 ms — nothing leaves this machine",
+       "how long the answer took is part of the sentence, from the rewrite's own response")
+    ok(popup.ai_note("ollama", "", True) == "ollama — nothing leaves this machine",
+       "a backend with no model named still says where the text goes")
+    # The one thing this line must never do: imply locality it has not been told. /v1/ai may be
+    # unreachable, and then the card names the backend and stops talking about where text goes.
+    ok(popup.ai_note("openrouter", "gpt-4o-mini", None) == "openrouter · gpt-4o-mini",
+       "an unknown `local` says the model and drops the claim: %r" % popup.ai_note("x", "y", None))
+    ok(popup.ai_note("", "qwen", True) == "", "and with no backend at all there is no sentence")
+    ok(popup.ai_note(None, None, True) == "", "not even from None")
+
+
+def test_provider_seam(popup, base):
+    """The host asks /v1/ai and puts the answer on the card, before the Rephrase button is clicked.
+
+    The seam, not the wording: a status line is set either way, so only reading it back proves the
+    question was asked and the answer parsed. Skips where no engine answers — the pure check above
+    still covers what the line says.
+    """
+    class FakeWindow:
+        def __init__(self):
+            self.props = {}
+
+        def setProperty(self, key, value):
+            self.props[key] = value
+
+        def property(self, key):
+            return self.props.get(key)
+
+    window = FakeWindow()
+    bridge = popup.Bridge(window, {"api": base, "sentence": "We are zorbulating."}, None, base)
+    bridge.note_ai()
+    status = window.property("status") or ""
+    if not status:
+        print("  seam: skipped (no engine at %s to ask)" % base)
+        return
+    ok(status.startswith("Rephrase: "), "the note names what it is about: %r" % status)
+    ok(bridge.ai_local is True, "and it learned where the text goes from the engine, not by guessing")
+    ok("leaves this machine" in status, "so the sentence is complete: %r" % status)
+
+    # After a rephrase, the provenance comes from the rewrite's own response — including the model
+    # that actually answered, which is the only thing that knows.
+    ok(bridge.note_for({"provider": "ollama", "model": "qwen2.5:1.5b", "elapsedMs": 1713})
+       == "Rephrase: ollama · qwen2.5:1.5b · 1713 ms — nothing leaves this machine",
+       "the result line carries the model and the time")
+    ok(bridge.note_for({"message": "no backend"}) == "",
+       "and an error response says nothing about a model, leaving the error to the error path")
+
+
 def test_live():
     """The card in a real process, placed for real, reporting from the X server.
 
@@ -530,6 +593,10 @@ def main():
         test_payload(popup)
         test_keyboard(popup)
         test_settings(popup)
+        test_provider_note(popup)
+        # The seam needs an engine to ask, and skips itself where there is none — the same shape as
+        # the live leg below, minus the screen.
+        test_provider_seam(popup, os.environ.get("GRAMMAR_API") or "http://127.0.0.1:8875")
     test_live()
     test_live_keyboard()
     # A gate that can pass having run nothing is not a gate. This one reported "0 assertions -

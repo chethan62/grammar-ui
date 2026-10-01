@@ -71,7 +71,7 @@ import urllib.request
 # the script is run directly.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from grammar_core import (CARET_GAP, KEYBOARD_ACTIONS, MAX_CANDIDATES, MAX_CHIPS, REPHRASE_TIMEOUT,
-                         TONES, INTENTS, DEFAULT_API, action_json, api_error_message,
+                         TONES, INTENTS, DEFAULT_API, action_json, ai_note, api_error_message,
                          candidates_from, card_colors, clamp, clear_card_action, get_json,
                          parse_payload, post_json, rephrase_body, settings_view, take_card_action)
 
@@ -91,6 +91,16 @@ except Exception as exc:  # noqa: BLE001 - any failure here means "use a notific
     sys.exit(2)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+# Diagnostics go to stderr, never stdout: stdout is this process's answer channel (one JSON line the
+# watcher reads), so a debug print there would be mistaken for an action. Off unless asked for, and
+# named like the watcher's switch.
+DEBUG = os.environ.get("GRAMMAR_POPUP_DEBUG") == "1"
+
+
+def debug(*args):
+    if DEBUG:
+        print("popup:", *args, file=sys.stderr, flush=True)
 QML = os.path.join(HERE, "grammar-card.qml")
 
 # Two flag sets, one window at a time. The finding card's is the safe one: override-redirect (so the
@@ -177,6 +187,9 @@ class Bridge(QObject):
         self.app = app
         self.api_base = api_base.rstrip("/")
         self.chosen = {"action": "", "text": ""}
+        # Whether the configured backend keeps the text on this machine. None until /v1/ai says, and
+        # never guessed: ai_note() drops the "where it goes" half rather than assert something.
+        self.ai_local = None
 
     @Slot(str, str)
     def choose(self, action, text):
@@ -219,10 +232,38 @@ class Bridge(QObject):
         candidates = candidates_from(response)
         if candidates:
             self.window.setProperty("candidates", candidates)
-            self.window.setProperty("status", "")
+            # Which model answered, and whether the sentence left the machine: the card is holding
+            # text that came back from somewhere, and the row under the button is where it can say so.
+            self.window.setProperty("status", self.note_for(response))
         else:
             self.window.setProperty("status", api_error_message(response, code))
         self.window.setProperty("busy", False)
+        debug("rephrase done: %d candidates, status %r"
+              % (len(candidates), self.window.property("status")))
+
+    def note_for(self, response=None, state=None):
+        """The one line about where a rephrase goes: "Rephrase: ollama · qwen2.5:1.5b — …".
+
+        From the rewrite's own answer when there is one, from the engine's /v1/ai otherwise, and
+        nothing at all when the engine cannot say. Said before the click as well as after it: the
+        question is worth more before sending the sentence than after.
+        """
+        source = response if isinstance(response, dict) and response.get("provider") else (state or {})
+        note = ai_note(source.get("provider"), source.get("model"), self.ai_local,
+                       source.get("elapsedMs"))
+        return ("Rephrase: " + note) if note else ""
+
+    def note_ai(self):
+        """Ask /v1/ai once, so the note above the Rephrase button is there before the click."""
+        code, state = get_json(self.api_base + "/v1/ai")
+        if code != 200 or not isinstance(state, dict):
+            return
+        self.ai_local = state.get("local")
+        note = self.note_for(state=state)
+        # Never over a line that is already saying something (a rephrase in flight, or an error).
+        if note and not self.window.property("status"):
+            self.window.setProperty("status", note)
+        debug("note_ai: local=%r, status %r" % (self.ai_local, self.window.property("status")))
 
     # ---- the AI runner: the server owns the setting, this panel is its face --------------------
     #
@@ -327,6 +368,12 @@ def main():
 
     bridge = Bridge(window, payload, app, api_base)
     engine.rootContext().setContextProperty("bridge", bridge)
+    if not settings_mode and payload.get("api"):
+        # Which model would rephrase, and whether the sentence would leave this machine — asked now,
+        # in the background, so the answer is on screen *before* the Rephrase button is clicked.
+        # Only when there is an engine to ask and a rephrase row to explain (payload["api"] is what
+        # canRephrase binds to, so the note and the row appear together or not at all).
+        threading.Thread(target=bridge.note_ai, daemon=True).start()
     if not settings_mode:
         # The keyboard route: a shortcut leaves a marker, and this process — the only one that can
         # answer for this card — turns it into the same action a click would. Cleared first, so only
