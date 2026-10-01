@@ -94,6 +94,16 @@ We should arrange a meeting to discuss the report.   ← click one to replace th
   rather than a switch, so it ends by itself: nothing has to be remembered the next morning, and a
   machine that reboots comes back checking. `grammar-pause` with no argument prints the state, and
   `grammar-doctor` reports it — a checker that has gone quiet on purpose should be able to say so.
+- **Ignore this word** appears only when the finding is one misspelled word, because what it adds to
+  is a *word* list: a phrase, a clause or a whole sentence would be a promise that cannot be kept, and
+  a grammar rule that happens to span one word (`She go`) is not a spelling — the word underneath it
+  would be hidden in every later sentence too. The word goes to the engine
+  (`POST /v2/ignore`), which is where every client's matches come through, so one list covers the
+  whole machine and a client on the LAN in one go. The toast says the rest and it matters: **harper
+  still flags the word, and every other editor still shows it.** What changed is that this engine
+  stops repeating itself, which is not the same thing as the word being right. `grammar-doctor`
+  reports how many words are on the list, and the list itself is a one-line-per-word file you can
+  edit: `~/.config/grammar-server/ignored-words` on the machine the engine runs on.
 
 ### Accept and dismiss from the keyboard
 

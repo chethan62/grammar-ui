@@ -191,6 +191,60 @@ def test_pause():
     ok(watched == [3600], "the card's own answer asks for an hour: %r" % watched)
 
 
+def test_finding_word():
+    """What the card is allowed to offer "Ignore this word" for.
+
+    The list behind that button is a word list, so the question is exactly "is this finding one
+    spelling of one word?" — and the ways it can be something else are all here, because a button
+    that adds a phrase to a word list is a promise the feature cannot keep.
+    """
+    piece = "We are zorbulating the report today."
+    spelling = {"rule": {"id": "MORFOLOGIK_RULE_EN_US"}, "offset": 7, "length": 11}
+    ok(watch.finding_word(piece, 7, spelling) == "zorbulating", "one misspelled word is one word")
+
+    ok(watch.finding_word(piece, 7, None) == "", "no finding is no word")
+    ok(watch.finding_word(piece, 7, {"rule": {"id": "SpellCheck"}, "length": 11}) == "zorbulating",
+       "harper's own name for the rule counts too")
+    # A grammar rule that happens to span one word: ignoring it by word would hide the *word* in
+    # every later sentence, which is not what the person meant when they clicked.
+    ok(watch.finding_word("She go to the office.", 0,
+                          {"rule": {"id": "HE_VERB_AGR"}, "length": 7}) == "",
+       "a grammar finding is not a spelling, whatever its span")
+    # A phrase, a clause, a whole sentence: all of them are not a word.
+    ok(watch.finding_word("She go to the office.", 0,
+                          {"rule": {"id": "MORFOLOGIK_RULE_EN_US"}, "length": 20}) == "",
+       "a span that covers spaces is not one word")
+    ok(watch.finding_word(piece, 7, {"rule": {"id": "MORFOLOGIK_RULE_EN_US"}, "length": 0}) == "",
+       "an empty span is not a word")
+    ok(watch.finding_word(piece, 7, {"rule": {"id": "MORFOLOGIK_RULE_EN_US"}}) == "",
+       "a finding with no length at all is not a word")
+
+
+def test_ignore_route():
+    """The card's answer reaches the engine, word and all.
+
+    The button and the request are two halves of one feature across two repositories: the card sends
+    {"action": "ignore-word"} and this is where the word it was about becomes a request. A route that
+    dropped the word would leave the card looking like it had worked, which is worse than a button
+    that never appeared.
+    """
+    asked = []
+    w = watch.Watcher.__new__(watch.Watcher)
+    w.busy, w.timer = False, None
+    w.ask = lambda issue, pos=None: {"action": "ignore-word"}
+    w.ignore_word = lambda word: asked.append(word)
+    w.offer(0, 7, "zorbulating", "tolerating",
+            {"span": [7, 18], "word": "zorbulating", "sentence": "We are zorbulating it."})
+    ok(asked == ["zorbulating"],
+       "the word the card was about is the word the engine is asked to ignore: %r" % asked)
+
+    # An answer with no word at all (an older card, a payload that lost the field) must not put an
+    # empty string into a word list — the engine refuses it, and the toast would name nothing.
+    asked[:] = []
+    w.offer(0, 7, "zorbulating", "tolerating", {"span": [7, 18], "sentence": "no word here"})
+    ok(asked == [""], "a missing word arrives empty, and ignore_word is what declines it: %r" % asked)
+
+
 def test_reexports():
     """Anything this module uses that only exists in grammar_core has to be imported.
 
@@ -858,6 +912,8 @@ def main():
     test_suggestions()
     test_blocklist()
     test_pause()
+    test_finding_word()
+    test_ignore_route()
     test_reexports()
     test_notification(tmp)
     test_module_loading(tmp)

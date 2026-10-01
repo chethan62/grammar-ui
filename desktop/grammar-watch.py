@@ -57,8 +57,9 @@ DEBUG = os.environ.get("GRAMMAR_WATCH_DEBUG") == "1"
 # the script is run directly.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from grammar_core import (BACK, CARET_GAP, FORWARD, MIN_CHARS, TAIL, add_blocked, alternatives,
-                          app_blocked, block_list, blocked_apps, clear_pause, first_span, others,
-                          parse_reply, paused_until, shown, snippet_window, suggestions, write_pause)
+                          app_blocked, block_list, blocked_apps, clear_pause, finding_word,
+                          first_span, others, parse_reply, paused_until, post_json, shown,
+                          snippet_window, suggestions, write_pause)
 
 # The file the per-app pause is kept in — beside the engine's own config, because it is the same
 # question ("what does this machine want?") asked about a different thing. One name per line, and
@@ -305,6 +306,36 @@ class Watcher:
                               "Suggestions are off until %s. `grammar-pause off` ends it early."
                               % time.strftime("%H:%M", time.localtime(until))])
 
+    def ignore_word(self, word):
+        """Ask the engine to stop reporting this word — the card's "Ignore this word".
+
+        A request to the engine rather than a filter in this client, for two reasons: the engine is
+        where every client's matches come through, so one list covers the watcher, the selection
+        checker and anything added later; and the answer carries the file it wrote, so the toast can
+        name it even when the engine is on another machine.
+
+        The word is still wrong to harper and to every other editor — this is one product declining to
+        repeat itself — and the toast says so, because the two are easy to confuse and only one of
+        them was built.
+        """
+        if not word:
+            return
+        base = (getattr(self.client, "API", "") or "").rstrip("/")
+        if not base:
+            debug("no engine address, so %r cannot be ignored" % word)
+            return
+        status, answer = post_json(base + "/v2/ignore", {"word": word})
+        if status != 200:
+            debug("the engine refused to ignore %r: %s" % (word, answer.get("message") or status))
+            return
+        debug("ignoring %r (%s words now)" % (word, answer.get("ignored")))
+        if shutil.which("notify-send"):
+            subprocess.Popen(["notify-send", "-a", "grammar", "-t", "6000",
+                              "Ignoring “%s”" % word,
+                              "This engine will not report it again. Other editors still will — "
+                              "delete the line from %s to bring it back."
+                              % (answer.get("path") or "its ignored-words file")])
+
     # ---- the check ----------------------------------------------------------------------
     def check(self):
         self.timer = None
@@ -385,6 +416,10 @@ class Watcher:
                  # a card offering "Ignore in this application" would be promising a rule about
                  # nobody, and the button is hidden rather than wrong.
                  "app": "" if app == "this application" else app,
+                 # The word this finding is about, when it is exactly one misspelled word. Empty
+                 # otherwise, which hides the card's ignore button: the engine's list is a *word*
+                 # list, so a phrase or a whole sentence cannot be added to it honestly.
+                 "word": finding_word(piece, start + span[0], shown(matches)),
                  # The badge is the engine's real time, not a decoration: it is how the user sees
                  # whether a suggestion is instant or cost something.
                  "badge": "Rules engine · %d ms" % round(self.last_engine_ms or 0),
@@ -438,6 +473,11 @@ class Watcher:
             if action == "pause-hour":
                 # Also not an edit, and also about the future rather than this finding.
                 self.pause_for(3600)
+                return
+            if action == "ignore-word":
+                # Not an edit either: it asks the engine to stop reporting this word, here and for
+                # anyone else using this engine.
+                self.ignore_word(issue.get("word") or "")
                 return
             if action not in ("replace", "sentence", "copy"):
                 return

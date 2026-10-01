@@ -212,9 +212,10 @@ def parse_payload(raw, argv=None):
             "api": as_text("api").rstrip("/"), "sentence": as_text("sentence"),
             # Every field the watcher sends has to be named here or it never reaches the card:
             # this whitelist is exactly where "others" was dropped, and the QML seam test cannot
-            # see that half of the seam. "app" is the same trap, one field later — the pause button
-            # reads it, and without this line the button never appears.
-            "others": as_count("others"), "app": as_text("app")}
+            # see that half of the seam. "app" was the same trap one field later, and "word" is the
+            # third — the card's "Ignore this word" button is drawn from it, so without this line the
+            # button never appears no matter what the watcher sends.
+            "others": as_count("others"), "app": as_text("app"), "word": as_text("word")}
 
 
 # ---- per-app pause ------------------------------------------------------------------------------
@@ -327,6 +328,27 @@ def paused_until(path=None, now=None):
     except (OSError, ValueError):
         return 0.0
     return until if until > (time.time() if now is None else now) else 0.0
+
+
+# The engine's own id for a spelling rule, as LanguageTool shows it, plus harper's native name in case
+# a rule ever arrives unmapped. Only these can be ignored by word: a grammar rule that happens to span
+# one word ("She go") is not a spelling, and hiding it by word would hide every later use of that word.
+SPELLING_RULES = ("MORFOLOGIK_RULE_EN_US", "SpellCheck")
+
+
+def finding_word(piece, offset, match):
+    """The single word a finding is about, or "" when it is not one word.
+
+    What the card needs before it offers "Ignore this word": the list behind that button is a word
+    list, so anything else — a phrase, a clause, a whole sentence — would be a promise the feature
+    cannot keep, and the button is hidden rather than wrong.
+    """
+    if not match or str((match.get("rule") or {}).get("id", "")) not in SPELLING_RULES:
+        return ""
+    span = piece[offset:offset + int(match.get("length") or 0)]
+    if not span or any(ch.isspace() for ch in span):
+        return ""
+    return span.strip()
 
 
 # ---- the keyboard route to a card's answer -------------------------------------------------------

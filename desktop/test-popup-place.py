@@ -169,6 +169,12 @@ def test_payload(popup):
     ok(popup.parse_payload('{"app": "  "}')["app"] == "",
        "and whitespace is no application at all")
     ok(popup.parse_payload("{}")["app"] == "", "a card with no application has none")
+    # The same trap a third time, and the reason the comment above it keeps growing: the card's
+    # "Ignore this word" button is drawn from payload.word, so the field has to survive this whitelist
+    # or the button simply never appears.
+    ok(popup.parse_payload('{"word": "zorbulating"}')["word"] == "zorbulating",
+       "the word the finding is about reaches the card")
+    ok(popup.parse_payload("{}")["word"] == "", "and a card with no word has none, which hides the button")
     # The GTK card shipped Pango markup and had to escape the document's text by hand; the QML
     # card renders plain text, so that escaping is gone by construction. What is left to check is
     # the palette it is rendered in: complete in both schemes, and legible in both.

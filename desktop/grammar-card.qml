@@ -228,6 +228,16 @@ Window {
                 text: "Pause for an hour"
                 onClicked: bridge.choose("pause-hour", "")
             }
+            // Only for a single misspelled word: the engine's list is a *word* list, so hiding a
+            // phrase or a sentence with it would be a promise the feature cannot keep. The host sends
+            // an empty word for anything else, which hides this rather than offering it wrongly.
+            Act {
+                flat: true
+                anchors.right: parent.right
+                visible: card.payload.word !== undefined && card.payload.word.length > 0
+                text: "Ignore this word"
+                onClicked: bridge.choose("ignore-word", "")
+            }
 
             // ---- the model's own answers --------------------------------------------------
             Rule { visible: card.canRephrase }

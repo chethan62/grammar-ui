@@ -324,6 +324,25 @@ def check_pause(path=None):
             "`grammar-pause off` brings suggestions back now; otherwise the pause ends by itself")
 
 
+def check_ignored(base):
+    """How many words this engine has been told to stop reporting.
+
+    The other honest answer to "why is this word not flagged?" — an ignored word and a paused checker
+    are the two states a person forgets they set. A warning, not a failure: nothing is broken, the
+    list is doing what it was asked to do.
+    """
+    status, body = http_json(base + "/status")
+    if status != 200:
+        return (False, True, "unknown (no answer from the engine)", "")
+    count = int(body.get("ignored") or 0)
+    if not count:
+        return (False, True, "none", "")
+    return (False, False, "%d word%s this engine does not report"
+            % (count, "" if count == 1 else "s"),
+            "they are in ignored-words on the machine the engine runs on — delete a line to "
+            "bring one back")
+
+
 def main():
     quiet = "--quiet" in sys.argv[1:]
     base = api_base()
@@ -338,6 +357,7 @@ def main():
         ("card", check_card()),
         ("entries", check_entries()),
         ("pause", check_pause()),
+        ("ignored", check_ignored(base)),
     ]
     if not quiet:
         print("grammar-doctor — engine at %s\n" % base)
