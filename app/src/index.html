@@ -3,47 +3,88 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Grammar settings</title>
+  <title>Grammar</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <div class="head">
-    <h1 class="title">Settings</h1>
+    <h1 class="title">Grammar</h1>
     <div class="state"><span class="dot" id="dot"></span><span id="state">reading…</span></div>
   </div>
 
-  <h2 class="caption">Ignored words</h2>
-  <div id="words"></div>
-  <div class="add"><input id="newWord" placeholder="a word to stop reporting" spellcheck="false"
+  <div class="tabs" role="tablist">
+    <button role="tab" id="tab-check" aria-controls="panel-check" aria-selected="true">Check</button>
+    <button role="tab" id="tab-rewrite" aria-controls="panel-rewrite" aria-selected="false">Rewrite</button>
+    <button role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="false">Settings</button>
+  </div>
+
+  <section role="tabpanel" id="panel-check" aria-labelledby="tab-check">
+    <label class="caption" for="draft">Text to check</label>
+    <textarea id="draft" rows="5" spellcheck="false" placeholder="Paste or type the text to check"></textarea>
+    <div class="add">
+      <button class="primary" id="check">Check</button>
+      <span class="status" id="found" role="status" aria-live="polite"></span>
+    </div>
+    <div id="findings"></div>
+  </section>
+
+  <section role="tabpanel" id="panel-rewrite" aria-labelledby="tab-rewrite" hidden>
+    <label class="caption" for="source">Rewrite</label>
+    <textarea id="source" rows="4" spellcheck="false" placeholder="Paste or type the text to rephrase"></textarea>
+    <div class="add">
+      <input id="intent" placeholder="intent: one word, e.g. shorten" spellcheck="false"
+             pattern="[a-z]{1,20}" aria-label="Intent, one lowercase word up to 20 letters">
+      <input id="tone" placeholder="tone: optional, e.g. formal" spellcheck="false" aria-label="Tone, optional">
+    </div>
+    <div class="add">
+      <button class="primary" id="rewrite">Rewrite</button>
+      <span class="status" id="rewriteState" role="status" aria-live="polite"></span>
+    </div>
+    <div id="candidates"></div>
+    <p class="note">The intent must be one lower-case word of up to 20 letters — the engine refuses
+       anything else. Tone is free text and only steers the model.</p>
+  </section>
+
+  <section role="tabpanel" id="panel-settings" aria-labelledby="tab-settings" hidden>
+    <h2 class="caption">Ignored words</h2>
+    <div id="words"></div>
+    <div class="add"><input id="newWord" placeholder="a word to stop reporting" spellcheck="false"
                             aria-label="Word to ignore">
-    <button id="add">Add</button></div>
-  <p class="note" id="wordsNote">The engine stops reporting these; removing one brings the findings back.</p>
-  <hr class="rule">
+      <button id="add">Add</button></div>
+    <p class="note" id="wordsNote">The engine stops reporting these; removing one brings the findings back.</p>
 
-  <h2 class="caption">AI settings</h2>
-  <p class="note muted">Which model rephrases your sentences. Checking your writing works either way —
-     this affects Rephrase only, and the choice survives a restart.</p>
+    <hr class="rule">
 
-  <label class="caption" for="provider">Runner</label>
-  <div class="field"><select id="provider"></select></div>
-  <p class="note" id="providerNote"></p>
+    <h2 class="caption">AI settings</h2>
+    <p class="note muted">Which model rephrases your sentences. Checking works either way — this affects
+       Rewrite only, and the choice survives a restart.</p>
 
-  <label class="caption" for="url">Address</label>
-  <div class="field"><input id="url" spellcheck="false"></div>
-  <p class="note">The base URL of the server, no /v1 needed at the end.</p>
+    <label class="caption" for="provider">Runner</label>
+    <div class="field"><select id="provider"></select></div>
+    <p class="note" id="providerNote"></p>
 
-  <label class="caption" for="model">Model</label>
-  <div class="field"><input id="model" list="models" spellcheck="false"></div>
-  <datalist id="models"></datalist>
-  <p class="note" id="modelNote">What this server reports, or type any model name.</p>
+    <label class="caption" for="url">Address</label>
+    <div class="field"><input id="url" spellcheck="false"></div>
+    <p class="note">The base URL of the server, no /v1 needed at the end.</p>
+
+    <label class="caption" for="model">Model</label>
+    <div class="field"><input id="model" list="models" spellcheck="false"></div>
+    <datalist id="models"></datalist>
+    <p class="note" id="modelNote">What this server reports, or type any model name.</p>
+
+    <label class="caption" for="language">Dialect</label>
+    <div class="field"><select id="language"></select></div>
+    <p class="note" id="languageNote">The dialect the checker reads your text as.</p>
+
+    <div class="add"><button class="primary" id="save">Save</button>
+      <span class="status" id="saveState" role="status" aria-live="polite"></span></div>
+  </section>
 
   <div class="foot">
     <div class="status" id="status" role="status" aria-live="polite"></div>
-    <button class="primary" id="save">Save</button>
   </div>
 
-  <!-- No module loader needed: the script imports nothing, and this also lets the same files be opened
-       over file:// for a quick look outside the Tauri shell. -->
+  <!-- No module loader: the script imports nothing, so the same three files open over file:// too. -->
   <script defer src="main.js"></script>
 </body>
 </html>
