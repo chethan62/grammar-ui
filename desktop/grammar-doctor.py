@@ -112,21 +112,20 @@ def verdict(rows):
 # Each returns (essential, ok, detail, fix). `fix` is empty when nothing needs doing.
 
 def check_install(bindir=None):
-    """The installed pieces, including the module the clients import and the card's own QML.
+    """The installed pieces, including the module the clients import.
 
-    grammar_core.py is not decoration: the watcher and the card both import it, and the card loads
-    grammar-card.qml, so an install that predates either change has binaries that look fine and die
-    on startup. Checking the files an install must have is the cheapest way to catch that — and it
-    is exactly the failure this command exists for.
-    """
+    grammar_core.py is not decoration: the watcher and the tools both import it, so an install
+    that predates it has binaries that look fine and die on startup. Checking the files an
+    install must have is the cheapest way to catch that — and it is exactly the failure this
+    command exists for."""
     bindir = bindir or BINDIR
-    wanted = ("grammar-lookup", "grammar-watch", "grammar-popup.py", "grammar-doctor",
-              "grammar-action", "grammar-pause", "grammar_core.py", "grammar-card.qml")
+    wanted = ("grammar-lookup", "grammar-watch", "grammar-doctor", "grammar-action",
+              "grammar-pause", "grammar_core.py")
     missing = [name for name in wanted if not os.path.exists(os.path.join(bindir, name))]
     if missing:
         return (True, False, "missing from %s: %s" % (bindir, ", ".join(missing)),
-                "run `make install` — the clients import grammar_core.py and the card loads "
-                "grammar-card.qml, so both must sit beside them")
+                  "run `make install` — the clients import grammar_core.py, so it must sit "
+                  "beside them")
     return (True, True, "%d installed files, including grammar_core.py" % len(wanted), "")
 
 
@@ -206,7 +205,7 @@ def check_rewrite(base):
     if not body.get("reachable"):
         return (False, False, "%s configured at %s, not answering"
                 % (provider, body.get("url", "?")),
-                "start it, or pick another runner: grammar-popup.py --settings")
+                  "start it, or point the engine at another one in its own ai.json")
     models = body.get("models") or []
     return (False, True, "%s · %s · answering (%d model%s)"
             % (provider, body.get("model", "?"), len(models), "" if len(models) == 1 else "s"), "")
@@ -250,22 +249,6 @@ def check_bus():
     return (True, True, "bus reachable, %d application%s visible" % (apps, "" if apps == 1 else "s"), "")
 
 
-def check_card():
-    try:
-        import PySide6  # noqa: F401
-    except Exception as exc:  # noqa: BLE001
-        return (True, False, "no Qt bindings here (%s)" % exc,
-                "install PySide6: `python -m pip install PySide6` or the distro package")
-    for path in (os.path.join(HERE, "grammar-card.qml"),
-                 os.path.join(BINDIR, "grammar-card.qml")):
-        if os.path.exists(path):
-            # The QML beside the host is what the host loads; a host without it fails to load the
-            # card entirely, which is exactly what happened once today.
-            return (True, True, "Qt %s and %s" % (PySide6.__version__, os.path.basename(path)), "")
-    return (True, False, "PySide6 is here but grammar-card.qml is not",
-            "run `make install` beside the host — the card cannot load without its QML")
-
-
 def icon_candidates(name):
     """Everywhere an icon called `name` can live for this user.
 
@@ -287,8 +270,8 @@ def check_entries():
     start, the menu just draws a blank square. Same shape as the exec bit and the unimported name —
     a reference to something that is not there — so it is checked rather than assumed.
     """
-    wanted = ("grammar-lookup.desktop", "grammar-settings.desktop", "grammar-accept.desktop",
-              "grammar-dismiss.desktop")
+    wanted = ("grammar-lookup.desktop", "grammar-accept.desktop", "grammar-dismiss.desktop")
+
     found = [name for name in wanted if os.path.exists(os.path.join(APPDIR, name))]
     if len(found) != len(wanted):
         return (False, False, "menu entries missing: %s" % ", ".join(sorted(set(wanted) - set(found))),
@@ -354,7 +337,6 @@ def main():
         ("rewrite", check_rewrite(base)),
         ("watcher", check_watcher()),
         ("bus", check_bus()),
-        ("card", check_card()),
         ("entries", check_entries()),
         ("pause", check_pause()),
         ("ignored", check_ignored(base)),

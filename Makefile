@@ -1,4 +1,4 @@
-# A desktop checker: the selection tool, the typing watcher, and the suggestion card. All of it
+# A desktop checker: the selection tool and the typing watcher. All of it
 # is python and stdlib, so there is nothing to build — install is a copy plus one user unit and
 # the launcher for the selection checker. `make test` is the same gate CI runs.
 UNITDIR ?= $(HOME)/.config/systemd/user
@@ -16,7 +16,6 @@ all:
 test:
 	python3 desktop/test-lookup.py
 	python3 desktop/test-watch.py
-	python3 desktop/test-popup-place.py
 	python3 desktop/test-doctor.py
 
 # Install for the current user: no sudo, and no unit ever references a checkout.
@@ -26,21 +25,18 @@ install:
 	install -m644 deployments/grammar-ui.svg $(ICONDIR)/grammar-ui.svg
 	install -m755 desktop/grammar-lookup.py $(BINDIR)/grammar-lookup
 	install -m755 desktop/grammar-watch.py $(BINDIR)/grammar-watch
-	install -m755 desktop/grammar-popup.py $(BINDIR)/grammar-popup.py
 	install -m755 desktop/grammar-doctor.py $(BINDIR)/grammar-doctor
 	install -m755 desktop/grammar-action.py $(BINDIR)/grammar-action
 	install -m755 desktop/grammar-pause.py $(BINDIR)/grammar-pause
 	install -m644 desktop/grammar_core.py $(BINDIR)/grammar_core.py
-	install -m644 desktop/grammar-card.qml $(BINDIR)/grammar-card.qml
 	sed 's|@BINDIR@|$(BINDIR)|' deployments/grammar-lookup.desktop > $(APPDIR)/grammar-lookup.desktop
-	sed 's|@BINDIR@|$(BINDIR)|' deployments/grammar-settings.desktop > $(APPDIR)/grammar-settings.desktop
 	sed 's|@BINDIR@|$(BINDIR)|' deployments/grammar-accept.desktop > $(APPDIR)/grammar-accept.desktop
 	sed 's|@BINDIR@|$(BINDIR)|' deployments/grammar-dismiss.desktop > $(APPDIR)/grammar-dismiss.desktop
-	chmod 644 $(APPDIR)/grammar-lookup.desktop $(APPDIR)/grammar-settings.desktop \
-	          $(APPDIR)/grammar-accept.desktop $(APPDIR)/grammar-dismiss.desktop
+	chmod 644 $(APPDIR)/grammar-lookup.desktop $(APPDIR)/grammar-accept.desktop \
+	          $(APPDIR)/grammar-dismiss.desktop
 	-update-desktop-database $(APPDIR) 2>/dev/null
 	-systemctl --user daemon-reload
-	@echo "Installed $(BINDIR)/grammar-{lookup,watch,action} and grammar-popup.py, plus the watcher unit."
+	@echo "Installed $(BINDIR)/grammar-{lookup,watch,action} and the watcher unit."
 	@echo "  systemctl --user enable --now grammar-watch   # suggestions as you type, anywhere"
 	@echo "Shortcuts are yours to choose (System Settings -> Shortcuts), and binding them is a"
 	@echo "manual step: this Makefile writes no keys, whatever an older README said. Suggested:"
@@ -53,10 +49,9 @@ install:
 uninstall:
 	-systemctl --user disable --now grammar-watch
 	rm -f $(UNITDIR)/grammar-watch.service
-	rm -f $(BINDIR)/grammar-lookup $(BINDIR)/grammar-watch $(BINDIR)/grammar-popup.py
 	rm -f $(BINDIR)/grammar-action
 	rm -f $(BINDIR)/grammar-pause
-	rm -f $(APPDIR)/grammar-lookup.desktop $(APPDIR)/grammar-settings.desktop
+	rm -f $(APPDIR)/grammar-lookup.desktop
 	rm -f $(APPDIR)/grammar-accept.desktop $(APPDIR)/grammar-dismiss.desktop
 	rm -f $(ICONDIR)/grammar-ui.svg
 	-update-desktop-database $(APPDIR) 2>/dev/null

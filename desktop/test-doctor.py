@@ -99,7 +99,9 @@ def test_it_can_pass():
     """On a machine where the chain works, it exits 0 and prints what it found."""
     good = run()
     out = good.stdout + good.stderr
-    ok("install" in out and "engine" in out and "bus" in out and "card" in out,
+    # The rows are the chain, and the chain no longer has a card in it: the Qt surface was removed,
+    # so the doctor reports what is left rather than a row for something nobody installs.
+    ok("install" in out and "engine" in out and "bus" in out,
        "it reports every part of the chain")
     # Quiet mode is for a person who only wants to hear about problems.
     quiet = run(args=("--quiet",))
@@ -128,7 +130,7 @@ def test_install_check(doctor):
     state = doctor.check_install()
     if state[1]:
         ok(all(os.path.exists(os.path.join(doctor.BINDIR, name))
-               for name in ("grammar_core.py", "grammar-card.qml")),
+               for name in ("grammar_core.py",)),
            "this install has the module and the card file beside the scripts")
     else:
         print("  install: nothing installed here — the file list is asserted above")
@@ -168,7 +170,7 @@ def test_entries_check(doctor):
     tmp = tempfile.mkdtemp(prefix="grammar-entries-")
     data = os.path.join(tmp, "share")
     old_apdir, old_data = doctor.APPDIR, os.environ.get("XDG_DATA_HOME")
-    names = ("grammar-lookup.desktop", "grammar-settings.desktop", "grammar-accept.desktop",
+    names = ("grammar-lookup.desktop", "grammar-accept.desktop",
              "grammar-dismiss.desktop")
     try:
         doctor.APPDIR = os.path.join(tmp, "applications")
@@ -194,7 +196,7 @@ def test_entries_check(doctor):
             fh.write("<svg/>")
         essential, okd, detail, fix = doctor.check_entries()
         ok(okd is True, "with the icon installed the check passes: %r" % detail)
-        ok("4 installed" in detail, "and it says how many entries it looked at: %r" % detail)
+        ok("3 installed" in detail, "and it says how many entries it looked at: %r" % detail)
     finally:
         doctor.APPDIR = old_apdir
         if old_data is None:

@@ -7,13 +7,13 @@ show, where it fits on a screen, how a rewrite request is shaped, what the setti
 can be read, reasoned about and tested with any Python, on a machine with no display, no
 accessibility bus and no toolkit. Before this existed, every pure assertion in the gates had to
 launch the *system* python through a re-exec dance, because importing the client module meant
-importing gi (grammar-watch.py) or exiting 2 when Qt is absent (grammar-popup.py).
+importing gi (grammar-watch.py).
 
 Leaves-first: this module imports only the standard library, and the clients import it. There is
 no cycle and there is nothing here that talks to a bus, a screen or a process.
 
 The two clients keep their own halves: grammar-watch.py owns the accessibility bus, the daemon and
-the toast; grammar-popup.py owns the Qt surface and the process contract. Both re-export what they
+the toast. Both re-export what they
 use from here, because callers and gates have always reached these names through the client.
 """
 

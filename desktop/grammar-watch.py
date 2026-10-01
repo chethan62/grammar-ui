@@ -117,64 +117,14 @@ def notify_actions(summary, body, actions=(("fix", "Fix it"), ("copy", "Copy fix
         return ""
 
 
-def popup_actions(issue, position):
-    """The card next to the caret. Returns {"action": ..., "text": ...}, or None when no card is
-    possible at all (no display, no Qt) — the caller then falls back to a toast.
-
-    Its own process, so nothing Qt touches this daemon. The payload is one dict — old, reason,
-    badge, alts, more, api, sentence, others — which is also the shape a future IPC would carry,
-    if this ever grows a
-    second host. It travels on stdin rather than in argv because the alternatives are a list, and
-    a list on a command line is a quoting bug waiting to happen.
-    """
-    # ponytail: one process per suggestion, so ~586 ms of Qt start-up and window map happens before the card
-    # is visible (measured 2026-10-01 at 81 °C; QML compilation is ~0 of it — see the A/B in grammar-server
-    # docs/architecture.md). A long-lived card driven over a FIFO removes most of that — build it when the
-    # number shows up in the budget, not before.
-    script = os.path.join(HERE, "grammar-popup.py")
-    if position is None or not os.path.exists(script):
-        return None
-    argv = [sys.executable, script, "--x", str(position[0]), "--y", str(position[1])]
-    if len(position) > 2 and position[2]:
-        # The caret's own height: enough for clamp() to hang the card above the line when the bottom
-        # of the screen is in the way, instead of putting it over the text being typed.
-        argv += ["--caret-h", str(int(position[2]))]
-    # The card makes the rephrase call itself, so it needs the engine's address and the sentence.
-    # Both arrive in the issue: the address from the client's own API constant (one source of the
-    # default, not two), and an empty one simply means the card offers no rephrase row instead of
-    # a button that fails on every click.
-    payload = {"old": issue.get("old", ""), "reason": issue.get("reason", ""),
-               "badge": issue.get("badge", ""), "alts": issue.get("alts") or [],
-               "api": issue.get("api", ""), "sentence": issue.get("sentence", "")}
-    if issue.get("more"):
-        payload["more"] = issue["more"]
-    if issue.get("others"):
-        # Only when there is one: the card says nothing rather than "0 more issues".
-        payload["others"] = int(issue["others"])
-    try:
-        proc = subprocess.run(argv, input=json.dumps(payload).encode(),
-                              capture_output=True, timeout=30)
-    except subprocess.SubprocessError:
-        return None
-    if proc.returncode != 0:
-        # Any failure is "no pop-up" — never an empty answer, which offer() reads as a dismissal and
-        # then drops the suggestion. A pop-up that cannot start must say so in the journal.
-        print("grammar-watch: pop-up exited %d: %s"
-              % (proc.returncode, proc.stderr.decode().strip()[:200]), file=sys.stderr, flush=True)
-        return None
-    return parse_reply(proc.stdout.decode())
-
-
 def ask(issue, position=None):
-    """Show it where it belongs: a card at the caret when there is something to apply, else a toast.
+    """Show it where it belongs: a notification.
 
-    A card with no diff is not a card — "the text changed, nothing was applied" is a message, and
-    messages belong in a notification. Same for anything without a replacement to offer.
+    It used to be a card at the caret when there was something to apply, and a toast otherwise. The
+    card is gone (see the README), so every finding is a message now. `position` stays on the
+    signature because the callers still measure the caret — that measurement is the seam a replacement
+    surface would need, and it is the only part of the card this daemon still knows about.
     """
-    if issue.get("new") or issue.get("alts"):
-        answer = popup_actions(issue, position)
-        if answer is not None:
-            return answer
     summary = issue.get("summary") or ("%s → %s" % (issue["old"], issue["new"]))
     body = issue.get("more") or issue.get("reason") or "Fix it to correct this in place."
     key = notify_actions(summary, body)
