@@ -47,12 +47,18 @@ function findingsFrom(body, text) {
     // A replacement is an object with a `value` — LanguageTool's shape, and what the engine sends. Reading
     // it as a string produced "Use [object Object]" on every Apply button, which no unit test caught because
     // the fixture had been written from the assumption rather than from a real response.
-    const first = replacements[0];
-    const after = first == null ? null : (typeof first === "string" ? first : (first.value ?? null));
+    // Every alternative the engine sent, not just the first: for `misspeled` harper offers misspelled,
+    // misspell and misspells, and for `wurd` its first pick is "ward" while the right one sits third. The
+    // first is kept as `after` so a finding with no suggestions still reads as having none.
+    const alts = replacements
+      .map((r) => (typeof r === "string" ? r : (r && r.value)))
+      .filter((v) => v);
+    const after = alts.length ? alts[0] : null;
     return {
       message: match.message || "Finding",
       before: text.slice(offset, offset + length),
       after,
+      alts,
       offset,
       length,
     };
@@ -66,18 +72,21 @@ function findingRow(finding) {
   label.textContent = finding.message + (finding.before ? " — " + finding.before : "");
   // textContent, never innerHTML: this is the user's own text coming back
 
-  const apply = document.createElement("button");
-  apply.className = "flat";
-  apply.textContent = finding.after ? "Use " + finding.after : "No suggestion";
-  apply.disabled = !finding.after;
-  apply.addEventListener("click", async () => {
-    const area = $("draft");
-    area.focus();
-    // setRangeText is native and takes UTF-16 indices, which is exactly what the engine sent — no diffing
-    // code belongs here. Re-checking after an edit rather than tracking shifts: every later offset moves.
-    area.setRangeText(finding.after, finding.offset, finding.offset + finding.length, "select");
-    saveDraft();
-    await check();
+  const applies = (finding.alts.length ? finding.alts : [null]).map((alt) => {
+    const button = document.createElement("button");
+    button.className = "flat";
+    button.textContent = alt ? "Use " + alt : "No suggestion";
+    button.disabled = !alt;
+    button.addEventListener("click", async () => {
+      const area = $("draft");
+      area.focus();
+      // setRangeText is native and takes UTF-16 indices, which is exactly what the engine sent — no diffing
+      // code belongs here. Re-checking after an edit rather than tracking shifts: every later offset moves.
+      area.setRangeText(alt, finding.offset, finding.offset + finding.length, "select");
+      saveDraft();
+      await check();
+    });
+    return button;
   });
 
   const fix = document.createElement("button");
@@ -104,7 +113,7 @@ function findingRow(finding) {
     }
   });
 
-  div.append(label, apply, fix, ignore);
+  div.append(label, ...applies, fix, ignore);
   return div;
 }
 
