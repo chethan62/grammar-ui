@@ -72,8 +72,9 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from grammar_core import (CARET_GAP, KEYBOARD_ACTIONS, MAX_CANDIDATES, MAX_CHIPS, REPHRASE_TIMEOUT,
                          TONES, INTENTS, DEFAULT_API, action_json, ai_note, api_error_message,
-                         candidates_from, card_colors, clamp, clear_card_action, get_json,
-                         parse_payload, post_json, rephrase_body, settings_view, take_card_action)
+                         candidates_from, card_colors, change_summary, clamp, clear_card_action,
+                         get_json, parse_payload, post_json, rephrase_body, settings_view,
+                         take_card_action)
 
 
 
@@ -232,6 +233,11 @@ class Bridge(QObject):
         candidates = candidates_from(response)
         if candidates:
             self.window.setProperty("candidates", candidates)
+            # What each one changed, so an answer can be judged *before* it is applied: the sentence
+            # being replaced is in the application, behind this card, and this is the only place the
+            # before and the after are both visible at once.
+            self.window.setProperty("changes", [list(change_summary(self.payload["sentence"], text))
+                                                for text in candidates])
             # Which model answered, and whether the sentence left the machine: the card is holding
             # text that came back from somewhere, and the row under the button is where it can say so.
             self.window.setProperty("status", self.note_for(response))

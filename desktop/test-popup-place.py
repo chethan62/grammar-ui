@@ -408,6 +408,83 @@ def test_provider_seam(popup, base):
        "and an error response says nothing about a model, leaving the error to the error path")
 
 
+def test_change_summary(popup):
+    """The hint that says what a rephrase changed — the only place before and after sit together.
+
+    The sentence being replaced is in the application behind the card, so without this line the only
+    way to judge an answer is to apply it and undo. Each case here is a way the hint can mislead: by
+    inventing a change that is only a capital, by missing one, or by letting a four-word cap read as
+    if that were all of it.
+    """
+    ok(popup.change_summary("We are zorbulating the report.", "We are reviewing the report.")
+       == ("zorbulating", "reviewing"), "a swapped word is one gone and one arrived")
+    ok(popup.change_summary("It is very important that we do so.", "It is crucial that we do so.")
+       == ("very, important", "crucial"),
+       "a replaced phrase reports every word that went, comma-separated: %r"
+       % (popup.change_summary("It is very important that we do so.", "It is crucial that we do so."),))
+    # Punctuation rides with its word: the token is "late." and when the full stop stays behind the
+    # diff says so, which is truer than pretending the words alone moved.
+    ok(popup.change_summary("We are late.", "We are late today.") == ("late.", "late, today."),
+       "an addition that re-punctuates reports both halves: %r"
+       % (popup.change_summary("We are late.", "We are late today."),))
+    ok(popup.change_summary("We are late today.", "We are late.") == ("late, today.", "late."),
+       "and so does the reverse")
+    ok(popup.change_summary("We are late.", "We are late.") == ("", ""),
+       "an unchanged sentence reports no change at all")
+    ok(popup.change_summary("we are late.", "We are late.") == ("", ""),
+       "and neither does a capital the model added at the start")
+    ok(popup.change_summary("one two", "one two three four five six", limit=3)
+       == ("", "three, four, five …"),
+       "the cap keeps the first three words and says there were more: %r"
+       % (popup.change_summary("one two", "one two three four five six", limit=3),))
+    removed, added = popup.change_summary("the quick fox", "the fox quick")
+    ok(removed and added, "a sentence the model reordered names the moved word on both sides, because "
+       "it did move: %r" % ((removed, added),))
+    ok(popup.change_summary("", "") == ("", ""), "two empty sentences change nothing")
+    ok(popup.change_summary(None, None) == ("", ""), "not even from None")
+
+
+def test_the_card_is_given_the_changes(popup):
+    """The host computes one diff per answer, in the same breath as the answers themselves.
+
+    They have to arrive together: a candidate list that grew while its diffs did not would either
+    render an answer with no hint, or — worse, and harder to notice — the *previous* answer's hint
+    under the new text.
+    """
+    class FakeWindow:
+        def __init__(self):
+            self.props = {}
+
+        def setProperty(self, key, value):
+            self.props[key] = value
+
+        def property(self, key):
+            return self.props.get(key)
+
+    window = FakeWindow()
+    sentence = "It is very important that we do so."
+    bridge = popup.Bridge(window, {"api": "http://127.0.0.1:9", "sentence": sentence}, None,
+                          "http://127.0.0.1:9")
+    real_post = popup.post_json
+    popup.post_json = lambda url, body: (200, {"candidates": ["It is crucial that we do so.",
+                                                             "We must do so now."],
+                                              "provider": "ollama", "model": "m", "elapsedMs": 12})
+    try:
+        bridge._work("", "concise")
+    finally:
+        popup.post_json = real_post
+
+    changes = window.property("changes")
+    ok(len(changes) == 2, "one diff per answer, and both answers are there: %r" % (changes,))
+    ok(list(changes[0]) == ["very, important", "crucial"],
+       "the first answer's own change: %r" % (changes[0],))
+    ok(changes[1] != changes[0] and changes[1][1],
+       "and the second one's, not the first's, repeated: %r" % (changes[1],))
+    ok(all(len(pair) == 2 for pair in changes), "each diff is a removed half and an added half")
+    ok(window.property("candidates") == ["It is crucial that we do so.", "We must do so now."],
+       "and the answers themselves are unchanged by any of this")
+
+
 def test_live():
     """The card in a real process, placed for real, reporting from the X server.
 
@@ -594,6 +671,8 @@ def main():
         test_keyboard(popup)
         test_settings(popup)
         test_provider_note(popup)
+        test_change_summary(popup)
+        test_the_card_is_given_the_changes(popup)
         # The seam needs an engine to ask, and skips itself where there is none — the same shape as
         # the live leg below, minus the screen.
         test_provider_seam(popup, os.environ.get("GRAMMAR_API") or "http://127.0.0.1:8875")

@@ -17,6 +17,7 @@ the toast; grammar-popup.py owns the Qt surface and the process contract. Both r
 use from here, because callers and gates have always reached these names through the client.
 """
 
+import difflib
 import json
 import os
 import time
@@ -530,6 +531,39 @@ def api_error_message(response, status=0):
     if status:
         return "the rewrite backend answered HTTP %d" % status
     return "the backend did not answer"
+
+
+def change_summary(before, after, limit=4):
+    """What a rephrase changed: the words that left, and the words that arrived.
+
+    difflib rather than a word-by-word walk, because a rephrase reorders and re-inflects and only an
+    aligned diff says what a person would call the change. Compared case-insensitively, so a sentence
+    that merely gained a capital does not read as changed; the words reported are the original
+    spellings, from whichever side they came.
+
+    Both sides are capped at `limit` words with "…": the card is small, and this is a hint about what
+    to look at, not the diff itself. Words are joined with ", " and carry their own punctuation, and a
+    word the model merely *moved* is reported on both sides — it did move, and pretending otherwise
+    would hide a reordered sentence. Pure, so the hint can be checked without a card.
+    """
+    left = (before or "").split()
+    right = (after or "").split()
+    matcher = difflib.SequenceMatcher(a=[word.lower() for word in left],
+                                      b=[word.lower() for word in right])
+    removed, added = [], []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag in ("delete", "replace"):
+            removed.extend(left[i1:i2])
+        if tag in ("insert", "replace"):
+            added.extend(right[j1:j2])
+    return _clipped(removed, limit), _clipped(added, limit)
+
+
+def _clipped(words, limit):
+    """A few words as one line, saying so when there were more."""
+    if len(words) > limit:
+        return ", ".join(words[:limit]) + " …"
+    return ", ".join(words)
 
 
 def ai_note(provider, model, local, ms=None):

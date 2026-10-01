@@ -83,6 +83,12 @@ We should arrange a meeting to discuss the report.   ← click one to replace th
   returns through the UI thread, because Qt is not thread-safe either and a frozen card is worse than a
   card. The sentence sent is the **corrected** one: handing a small model your own errors invites
   it to preserve them.
+- **Each answer shows what it changed**, under the answer itself: struck-through and muted for the
+  words that went, full contrast for the words that arrived, against the sentence you are about to
+  replace. The sentence lives in the application behind the card, so it can never be shown beside the
+  answer — the diff is the part of "before and after" this card can honestly hold. It is stdlib
+  `difflib` over lower-cased words, so a model that only added a capital reports no change at all; a
+  word that merely moved is named on both sides, because it did move.
 - **The card says where a rephrase goes, before you click.** The line under the Rephrase button
   reads `Rephrase: ollama · qwen2.5:1.5b — nothing leaves this machine`, asked of the engine's own
   `/v1/ai` when the card opens; after a rephrase it becomes the model that actually answered and how

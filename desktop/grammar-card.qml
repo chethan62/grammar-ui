@@ -41,6 +41,7 @@ Window {
     property var payload: ({})       // what the watcher sent
     property var colors: ({})        // from the desktop's palette, via the host
     property var candidates: []      // the model's alternatives, filled by the host
+    property var changes: []         // what each alternative changed: [[removed, added], ...]
     property var settings: ({})      // GET /v1/ai, through the host
     property string view: "finding"  // "finding" | "settings"
     property string status: ""
@@ -248,12 +249,40 @@ Window {
                 visible: card.canRephrase
                 Repeater {
                     model: card.candidates
-                    delegate: Act {
+                    delegate: Column {
                         required property string modelData
-                        flat: true
-                        text: modelData
-                        // A rephrase replaces the whole sentence, so this answer carries its text.
-                        onClicked: bridge.choose("sentence", modelData)
+                        required property int index
+                        width: parent.width
+                        spacing: 1
+                        Act {
+                            flat: true
+                            text: modelData
+                            // A rephrase replaces the whole sentence, so this answer carries its text.
+                            onClicked: bridge.choose("sentence", modelData)
+                        }
+                        // What this answer changed, against the sentence you are replacing — the same
+                        // two colours the finding view already uses for the original and the fix:
+                        // struck-through and muted for what went, full contrast for what arrived.
+                        Row {
+                            spacing: 10
+                            leftPadding: 2
+                            visible: card.changes.length > index && card.changes[index].length == 2
+                                     && (card.changes[index][0].length > 0 || card.changes[index][1].length > 0)
+                            Text {
+                                visible: text.length > 0
+                                text: card.changes.length > index ? card.changes[index][0] : ""
+                                font.pixelSize: 11
+                                font.strikeout: true
+                                color: card.c("faint", "#8a93a0")
+                            }
+                            Text {
+                                visible: text.length > 0
+                                text: card.changes.length > index ? card.changes[index][1] : ""
+                                font.pixelSize: 11
+                                font.weight: Font.DemiBold
+                                color: card.c("text", "#e7eaee")
+                            }
+                        }
                     }
                 }
             }
