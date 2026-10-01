@@ -141,7 +141,7 @@ Window {
                 Text {
                     text: card.payload.badge || ""
                     font.pixelSize: 11
-                    color: card.c("faint", "#8a93a0")
+                    color: card.c("faint", "#6b7280")
                 }
                 // The way in to the settings. The card is where the checking happens, so it is
                 // where the backend is chosen; after the browser UI was removed there is no other
@@ -166,7 +166,7 @@ Window {
                 visible: text.length > 0
                 text: card.payload.more || ""
                 font.pixelSize: 12
-                color: card.c("faint", "#8a93a0")
+                color: card.c("faint", "#6b7280")
                 wrapMode: Text.WordWrap
             }
             // The sentence often carries more than one issue, and the engine's own sample does:
@@ -274,7 +274,7 @@ Window {
                                 text: card.changes.length > index ? card.changes[index][0] : ""
                                 font.pixelSize: 11
                                 font.strikeout: true
-                                color: card.c("faint", "#8a93a0")
+                                color: card.c("faint", "#6b7280")
                             }
                             Text {
                                 visible: text.length > 0
@@ -415,7 +415,7 @@ Window {
                                     if (t === "good") return "#2f9e57"
                                     if (t === "warn") return "#d9822b"
                                     if (t === "bad") return "#cf4b3f"
-                                    return card.c("faint", "#8a93a0")
+                                    return card.c("faint", "#6b7280")
                                 }
                             }
                             Text {
@@ -657,7 +657,7 @@ Window {
                     visible: text.length > 0
                     text: card.s("hint", "")
                     font.pixelSize: 11
-                    color: card.c("faint", "#8a93a0")
+                    color: card.c("faint", "#6b7280")
                     wrapMode: Text.WordWrap
                 }
 
@@ -729,7 +729,7 @@ Window {
         font.pixelSize: 11
         font.weight: Font.DemiBold
         font.letterSpacing: 0.8
-        color: card.c("faint", "#8a93a0")
+        color: card.c("faint", "#6b7280")
     }
 
     // A labelled row: caption, the control, and a note that says what it wants or what the state
@@ -749,7 +749,7 @@ Window {
             visible: field.note.length > 0
             text: field.note
             font.pixelSize: 11
-            color: card.c("faint", "#8a93a0")
+            color: card.c("faint", "#6b7280")
             wrapMode: Text.WordWrap
         }
     }
@@ -772,7 +772,10 @@ Window {
             font.weight: act.primary ? Font.DemiBold : Font.Normal
             color: act.enabled
                    ? (act.primary ? card.c("accentInk", "#ffffff") : card.c("text", "#14181d"))
-                   : card.c("faint", "#8a93a0")
+                   : card.c("faint", "#6b7280")
+            // Disabled is carried by opacity, not by a colour: `faint` is the 11px note colour and has
+            // to clear 4.5:1, which is far too legible to read as "this will not respond".
+            opacity: act.enabled ? 1.0 : 0.55
             elide: Text.ElideRight
         }
         background: Rectangle {

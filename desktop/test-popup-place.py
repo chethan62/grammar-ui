@@ -200,6 +200,15 @@ def test_payload(popup):
         ok(contrast(colours["accentInk"], colours["accent"]) >= 4.5,
            "the primary chip's label is legible on the accent: %.1f:1"
            % contrast(colours["accentInk"], colours["accent"]))
+    # Every pair that carries text, not just the two that were obvious. `faint` was the one nobody
+    # checked, and it was the smallest text in the panel at the worst contrast (3.11 light / 3.80 dark).
+    for fg, bg, what in (("muted", "surface", "the notes and secondary lines"),
+                         ("faint", "surface", "the 11px notes")):
+        for shade in (False, True):
+            colours = popup.card_colors(shade)
+            got = contrast(colours[fg], colours[bg])
+            ok(got >= 4.5, "%s (%s): %s on %s is %.2f"
+               % (what, "dark" if shade else "light", fg, bg, got))
     ok(popup.card_colors(True)["surface"] != popup.card_colors(False)["surface"],
        "and the two schemes are genuinely different")
     ok(popup.action_json("replace", "the") == '{"action": "replace", "text": "the"}',
