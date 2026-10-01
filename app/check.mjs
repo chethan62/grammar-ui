@@ -67,6 +67,11 @@ const shape = {
 const modelRows = findingsFrom(shape, emojiText);
 if (modelRows.length !== 3) throw new Error(`expected 3 rows, got ${modelRows.length}`);
 if (modelRows[0].before !== "teh" || modelRows[0].after !== "the") throw new Error("row 0 text is wrong");
+// the rule id decides whether a word-level action is safe to offer at all
+if (modelRows[0].rule !== "MORFOLOGIK_RULE_EN_US") throw new Error("the rule id must survive the model");
+if (findingsFrom({ matches: [{ message: "x", offset: 0, length: 1, replacements: [] }] }, "a")[0].rule !== "") {
+  throw new Error("a finding with no rule must report an empty rule, not undefined");
+}
 if (modelRows[1].after !== null) throw new Error("a finding with no replacements must have after === null");
 // the bug that shipped: an object read as a string renders as "[object Object]" on every button
 if (modelRows[0].after !== "the") throw new Error(`replacement object not read: got ${modelRows[0].after}`);
