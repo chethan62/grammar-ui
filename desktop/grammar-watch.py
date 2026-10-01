@@ -37,9 +37,6 @@ from gi.repository import Atspi, GLib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-# ponytail: fixed-size read around the caret — one cheap read per pause instead of reading a
-# whole 50-page document. Widen BACK if suggestions ever miss a sentence that starts further up.
-DEBOUNCE_MS = 1200
 # ponytail: events are the fast path, but LibreOffice's a11y event emission is partial — a
 # slow poll is what makes this work in the app it was built for. One bounded read per tick;
 # the engine is only asked when the text actually changed.
@@ -57,7 +54,7 @@ DEBUG = os.environ.get("GRAMMAR_WATCH_DEBUG") == "1"
 # the script is run directly.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from grammar_core import (BACK, BLOCKED_PATH, CARET_GAP, FORWARD, MIN_CHARS, TAIL, add_blocked, alternatives,
-                          app_blocked, block_list, blocked_apps, clear_pause, finding_word,
+                          app_blocked, block_list, blocked_apps, clear_pause, debounce_ms, finding_word,
                           first_span, others, parse_reply, paused_until, post_json, shown,
                           snippet_window, suggestions, write_pause)
 
@@ -208,7 +205,13 @@ class Watcher:
             return False
         if self.timer:
             GLib.source_remove(self.timer)
-        self.timer = GLib.timeout_add(DEBOUNCE_MS, self.check)
+        # The wait follows how fast the engine actually was: the fixed 1200 ms was the latency, not the
+        # check. See debounce_ms in grammar_core for the bands and the measurements behind them.
+        wait = debounce_ms(self.last_engine_ms)
+        self.timer = GLib.timeout_add(wait, self.check)
+        last = self.last_engine_ms
+        debug("debounce %d ms (engine %s)" % (wait, "%.0f ms" % last if last is not None
+                                              else "not measured yet"))
         return False
 
     def adopt(self, obj):
@@ -389,6 +392,9 @@ class Watcher:
             # Never silent: an unreachable engine is the first thing to suspect when this
             # daemon appears to do nothing, and it is what the lookup client shouts about.
             print("grammar-watch: engine check failed: %s" % exc, file=sys.stderr, flush=True)
+            # A failed check measured nothing, and an engine that just failed is not a fast engine:
+            # keeping the old number would have the next pause debounce as if it were healthy.
+            self.last_engine_ms = None
             return False
         self.last_engine_ms = (time.monotonic() - started) * 1000.0
         debug("matches: %d in %.0f ms" % (len(matches), self.last_engine_ms))

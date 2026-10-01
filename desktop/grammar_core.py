@@ -362,6 +362,30 @@ def paused_until(path=None, now=None):
 SPELLING_RULES = ("MORFOLOGIK_RULE_EN_US", "SpellCheck")
 
 
+def debounce_ms(last_engine_ms):
+    """How long to wait after the last keystroke before asking, given how fast the engine was.
+
+    The wait was a fixed 1200 ms, and that timer was most of what a user felt: measured on the machine
+    this was built for, /v2/check answers in 0-1 ms once the connection is warm (49 ms on the first
+    call, which pays for the TCP and the harper cycle). A debounce a thousand times the thing it waits
+    for is not patience, it is the whole latency. So the wait follows the last measurement.
+
+    Bands rather than a formula: a formula needs its reasoning carried around, and a band is one
+    sentence in a journal line. A slow engine is given a *longer* wait, not a shorter one — the way to
+    make a slow engine feel worse is to hand it more requests.
+
+    `None` means nothing has been measured yet (a cold start, or a check that failed), which is not
+    the same as fast.
+    """
+    if last_engine_ms is None:
+        return 600
+    if last_engine_ms < 40:
+        return 300
+    if last_engine_ms < 250:
+        return 900
+    return 1500
+
+
 def finding_word(piece, offset, match):
     """The single word a finding is about, or "" when it is not one word.
 

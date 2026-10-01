@@ -9,6 +9,7 @@ Run it with the system python (the one that has gi): it re-execs itself if given
 CI and `make test` can just call python3.
 """
 
+import contextlib
 import importlib.util
 import io
 import json
@@ -94,6 +95,92 @@ def test_window():
     s, e = watch.snippet_window("Short.", 6)
     ok(e == 6 and s <= 6, "clamped at the end: %r" % ((s, e),))
     ok(watch.snippet_window("after a line\nbreak here", 15)[0] == 13, "a newline counts as a boundary")
+
+
+def test_debounce_follows_the_engine():
+    """The wait is a function of the last measurement, not a constant.
+
+    A fixed 1200 ms was most of what a user felt: measured on this machine, /v2/check answers in 0-1 ms
+    warm (49 ms on the first call, which pays for the connection), so the timer was a thousand times the
+    thing it waited for. The interesting assertions are the bands' *edges* — that is where a wrong `<`
+    hides — and that a slow engine waits longer rather than being handed more requests.
+    """
+    ok(watch.debounce_ms(None) == 600,
+       "nothing measured yet is not the same as fast: %r" % watch.debounce_ms(None))
+    ok(watch.debounce_ms(0) == 300 and watch.debounce_ms(15) == 300 and watch.debounce_ms(39) == 300,
+       "a millisecond engine is asked after 300 ms: %r" % watch.debounce_ms(15))
+    ok(watch.debounce_ms(40) == 900 and watch.debounce_ms(120) == 900 and watch.debounce_ms(249) == 900,
+       "a middling engine: 900 ms: %r" % watch.debounce_ms(120))
+    ok(watch.debounce_ms(250) == 1500 and watch.debounce_ms(9000) == 1500,
+       "a slow engine waits longest, so it is not handed more requests: %r" % watch.debounce_ms(9000))
+    ok(watch.debounce_ms(1) < watch.debounce_ms(100) < watch.debounce_ms(1000),
+       "and the wait never falls as the engine gets slower")
+    ok(watch.debounce_ms(None) < watch.debounce_ms(9000),
+       "the unknown case waits less than the known-slow one: it is a first guess, not a back-off")
+
+
+def test_the_wait_is_scheduled_from_the_measurement():
+    """The wiring, not the arithmetic: on_text must hand the adaptive wait to GLib, and explain itself.
+
+    Reading the journal line is not enough. The line is built from the same number, so a hard-coded 1200
+    at the call site would leave it reading perfectly while the timer fired at 1200 — which is exactly the
+    regression this test exists for, and it was written that way first and caught by breaking the call
+    site on purpose. So what GLib is *given* is captured and asserted.
+    """
+    class FakeText:
+        def get_editable_text_iface(self):
+            return object()
+
+        def get_role_name(self):
+            return "text"
+
+    class FakeEvent:
+        source = FakeText()
+
+    watcher = watch.Watcher.__new__(watch.Watcher)  # no client and no GLib loop: on_text needs neither
+    watcher.target = FakeText()
+    watcher.timer = None
+    watcher.last_engine_ms = None
+
+    scheduled, said = [], []
+    real_add, real_debug = watch.GLib.timeout_add, watch.DEBUG
+
+    def fake_add(ms, fn):
+        scheduled.append(ms)
+        return 4242  # a number the real GLib will not hand out in this process, so the two are told apart
+
+    watch.GLib.timeout_add, watch.DEBUG = fake_add, True
+    try:
+        for last in (None, 5.0, 120.0, 5000.0):
+            watcher.last_engine_ms = last
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                watch.Watcher.on_text(watcher, FakeEvent())
+            said.append(err.getvalue().strip())
+    finally:
+        watch.GLib.timeout_add, watch.DEBUG = real_add, real_debug
+
+    ok(scheduled == [600, 300, 900, 1500],
+       "the wait actually handed to GLib follows the measurement: %r" % (scheduled,))
+    ok(all("debounce %d ms" % ms in line for ms, line in zip(scheduled, said)),
+       "and the journal line says the number it scheduled, not another: %r" % (said,))
+    ok("not measured yet" in said[0],
+       "a first pause admits the engine has not been timed: %r" % said[0])
+    ok("5 ms" in said[1], "and a later one carries the measurement: %r" % said[1])
+
+    # The stub proves what was asked for; this proves the real GLib accepts it, and that a second pause
+    # cancels the pending source rather than leaving two timers on the same document.
+    watcher.timer = None
+    watch.Watcher.on_text(watcher, FakeEvent())
+    first = watcher.timer
+    ok(isinstance(first, int) and first != 4242,
+       "real GLib returns its own source id for the adaptive wait: %r" % (first,))
+    watch.Watcher.on_text(watcher, FakeEvent())
+    ok(isinstance(watcher.timer, int) and watcher.timer != first,
+       "and the next pause cancels that source and schedules another: %r -> %r"
+       % (first, watcher.timer))
+    watch.GLib.source_remove(watcher.timer)
+    watcher.timer = None
 
 
 def test_suggestions():
@@ -1111,6 +1198,8 @@ def main():
         return 0
     tmp = tempfile.mkdtemp(prefix="grammar-watch-test-")
     test_window()
+    test_debounce_follows_the_engine()
+    test_the_wait_is_scheduled_from_the_measurement()
     test_suggestions()
     test_blocklist()
     test_pause()
