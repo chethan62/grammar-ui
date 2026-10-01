@@ -15,7 +15,7 @@ the checking happens now, and the page was a second surface to keep in step.
 | `grammar-lookup` | checks the text you have **selected**, on **Ctrl+Alt+C** |
 | `grammar-watch` | checks the sentence around your **caret** while you type, and offers a card |
 | `grammar-popup.py` | the card itself — its own process, so a card that dies cannot take the watcher with it |
-| `grammar-popup.py --settings` | the AI-runner panel: which model rephrases (also in the menu as "Choose the AI runner") |
+| `grammar-popup.py --settings` | the settings window: what it skips (ignored words, paused applications, the pause) and which model rephrases |
 | `grammar-doctor` | is the whole chain working? Every silent failure this product has, named with its fix |
 | `grammar-action` | `accept` / `dismiss` — what the keyboard shortcuts run |
 | `grammar-pause` | `15m` / `1h` / `off` — silence the checker for a while, or bring it back; `--blocks` lists the applications you have ignored, `--unblock <app>` checks in one of them again |

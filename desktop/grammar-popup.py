@@ -347,7 +347,7 @@ class Bridge(QObject):
             self.window.setProperty("status", note)
         debug("note_ai: local=%r, status %r" % (self.ai_local, self.window.property("status")))
 
-    # ---- the AI runner: the server owns the setting, this panel is its face --------------------
+    # ---- the AI runner: one group inside the settings window, not the window's subject ---------
     #
     # Nothing here decides anything. GET /v1/ai already knows the presets, which one is
     # configured, whether it answers, what models it has, and whether this machine may change it;
