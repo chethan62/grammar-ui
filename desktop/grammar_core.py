@@ -519,11 +519,19 @@ def rephrase_body(sentence, tone="", intent=""):
 
 def candidates_from(response):
     """The alternatives out of a rewrite response. Pure, and tolerant: that JSON is another
-    process's. An error response carries no candidates, only a message worth showing."""
+    process's. An error response carries no candidates, only a message worth showing.
+
+    A `candidates` that is not a list is that process's bug, and iterating it is our crash: a number
+    raises, a dict yields its *keys* as alternatives, and a string yields its letters. So the shape is
+    checked before anything is read out of it — nothing here is worth dying for.
+    """
     if not isinstance(response, dict) or response.get("message"):
         return []
+    values = response.get("candidates")
+    if not isinstance(values, (list, tuple)):
+        return []
     out = []
-    for value in response.get("candidates") or []:
+    for value in values:
         if isinstance(value, str) and value.strip() and value.strip() not in out:
             out.append(value.strip())
     return out[:MAX_CANDIDATES]
@@ -580,17 +588,19 @@ def ai_note(provider, model, local, ms=None):
     The wording matches the settings panel's on purpose — two surfaces disagreeing about whether your
     text leaves the machine would be worse than either one alone.
 
-    `local` is None when it is not known, and then the note names the backend without saying where the
-    text goes: this is the one line in the product that must not guess.
+    Everything here is another process's JSON, so it is read defensively rather than trusted: a
+    number where a name belongs is that process's bug, not a reason for the card to die mid-rephrase.
+    `local` is the exception — it must be a real boolean, because it is the one line in the product
+    that may not guess, and "true" as a string would make the card *claim* locality it was never told.
     """
-    provider = (provider or "").strip()
+    provider = str(provider or "").strip()
     if not provider:
         return ""
-    model = (model or "").strip()
+    model = str(model or "").strip()
     who = "%s · %s" % (provider, model) if model else provider
-    if ms:
+    if isinstance(ms, (int, float)) and ms:
         who += " · %d ms" % round(ms)
-    if local is None:
+    if not isinstance(local, bool):
         return who
     where = "nothing leaves this machine" if local else "what you rephrase leaves this machine"
     return "%s — %s" % (who, where)

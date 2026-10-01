@@ -541,8 +541,13 @@ def test_streaming_rewrite(popup):
                 self.send_header("Content-Type", "application/x-ndjson")
                 self.end_headers()
                 for line in lines:
-                    self.wfile.write(("%s\n" % line).encode())
-                    self.wfile.flush()
+                    try:
+                        self.wfile.write(("%s\n" % line).encode())
+                        self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError):
+                        # The client stopped reading and dropped the connection — which is exactly what
+                        # the cancel case below is testing, and why this is caught instead of printed.
+                        return
                     if delay:
                         time.sleep(delay)
 
@@ -586,6 +591,86 @@ def test_streaming_rewrite(popup):
     got = popup.stream_rewrite("http://127.0.0.1:9/v2/rewrite", {"text": "x"})
     ok(got[0] == 0 and "cannot reach" in got[1].get("message", ""),
        "and an engine that is not there reads the same way post_json's failure does: %r" % (got,))
+
+
+def test_hostile_input_from_the_engine(popup):
+    """The readers that take another process's JSON, fed shapes that process should never send.
+
+    The engine is the one input these functions do not control — and if someone points the panel at a
+    proxy, whatever answers on that port. A number where a list belongs is that process's bug; what
+    matters here is that it is not *our* crash, and in one case that it cannot become our lie. Every
+    case below is one a sweep found or a reading of the code predicted.
+    """
+    # candidates_from: not a list at all used to raise, or worse, yield a dict's keys as alternatives.
+    for value in (7, 1.5, True, "abc", {"a": 1}, None):
+        try:
+            got = popup.candidates_from({"candidates": value})
+            ok(got == [], "candidates=%r yields nothing rather than a crash or a key: %r"
+               % (value, got))
+        except Exception as exc:
+            ok(False, "candidates=%r raised %s: %s" % (value, type(exc).__name__, exc))
+    ok(popup.candidates_from({"candidates": ["ok", None, 3, ""]}) == ["ok"],
+       "and inside a real list only real strings survive")
+
+    # read_stream: framing that is broken but still JSON.
+    events = list(popup.read_stream(['{"delta": 5}', '{"candidates": 7}']))
+    ok(events[0] == ("delta", "5"), "a number where words belong is read as text: %r" % (events,))
+    ok(events[-1] == ("done", {"candidates": 7}),
+       "and the stream ends on the answer key, whatever it holds: %r" % (events[-1],))
+
+    # ai_note: a wrong-typed `local` must drop the claim rather than assert one.
+    for value in ("true", 1, [], {}, 0, "yes"):
+        got = popup.ai_note("ollama", "m", value)
+        ok("leaves this machine" not in got,
+           "local=%r is not a boolean, so nothing is claimed about where text goes: %r" % (value, got))
+    ok(popup.ai_note(5, None, True) == "5 — nothing leaves this machine",
+       "a number where a backend name belongs is text, not a crash")
+    ok(popup.ai_note("ollama", "m", True, "fast") == "ollama · m — nothing leaves this machine",
+       "and a non-numeric duration is left out rather than rounded into nonsense")
+    ok(popup.ai_note("ollama", "m", True, 12.4).endswith("· 12 ms — nothing leaves this machine"),
+       "while a real one is still shown: %r" % popup.ai_note("ollama", "m", True, 12.4))
+
+
+def test_a_background_failure_is_not_silent(popup):
+    """A thread that dies quietly is how a card sits on "Rephrasing…" forever.
+
+    Four paths run off the UI thread (the rephrase, the note, loading and saving the panel), so one
+    wrapper catches them all: whatever goes wrong becomes a sentence on the card with the button back.
+    The test drives the wrapper directly, with a body that raises, because that is the seam.
+    """
+    class FakeWindow:
+        def __init__(self):
+            self.props = {}
+
+        def setProperty(self, key, value):
+            self.props[key] = value
+
+        def property(self, key):
+            return self.props.get(key)
+
+    window = FakeWindow()
+    bridge = popup.Bridge(window, {"api": "http://127.0.0.1:9", "sentence": "x"}, None,
+                          "http://127.0.0.1:9")
+    window.props["busy"] = True
+
+    def explode():
+        raise RuntimeError("the engine answered something odd")
+
+    thread = bridge._in_background(explode)
+    ok(thread is not None, "the wrapper hands back the thread, so a caller can wait for it")
+    thread.join(timeout=10)
+    ok(not thread.is_alive(), "and the body ran to completion, exception and all")
+    status = window.property("status") or ""
+    ok(status.startswith("That did not work:"), "the failure is on the card: %r" % status)
+    ok("the engine answered something odd" in status,
+       "carrying the exception's own words, which is the only useful part: %r" % status)
+    ok(window.property("busy") is False,
+       "and the card is usable again rather than stuck mid-rephrase: %r" % window.property("busy"))
+
+    quiet = bridge._in_background(lambda: None)
+    quiet.join(timeout=10)
+    ok((window.property("status") or "").startswith("That did not work:"),
+       "while a body that works leaves whatever the last message was alone")
 
 
 def test_live():
@@ -778,6 +863,8 @@ def main():
         test_the_card_is_given_the_changes(popup)
         test_stream_reader(popup)
         test_streaming_rewrite(popup)
+        test_hostile_input_from_the_engine(popup)
+        test_a_background_failure_is_not_silent(popup)
         # The seam needs an engine to ask, and skips itself where there is none — the same shape as
         # the live leg below, minus the screen.
         test_provider_seam(popup, os.environ.get("GRAMMAR_API") or "http://127.0.0.1:8875")

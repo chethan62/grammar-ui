@@ -227,7 +227,29 @@ class Bridge(QObject):
     def rephrase(self, tone_index, intent_index):
         tone = TONES[tone_index] if 0 <= tone_index < len(TONES) else ""
         intent = INTENTS[intent_index] if 0 <= intent_index < len(INTENTS) else ""
-        threading.Thread(target=self._work, args=(tone, intent), daemon=True).start()
+        self._in_background(self._work, tone, intent)
+
+    def _in_background(self, work, *args):
+        """Run `work` off the UI thread, and never let it die silently.
+
+        Every call this card makes to the engine happens on a thread, because a frozen card is worse
+        than no card. A thread that raises prints a traceback to stderr and leaves the card saying
+        whatever it said last — which is how "Rephrasing…" can sit there forever with nothing wrong
+        on screen. One wrapper for all four paths, so any bug in them becomes a sentence instead.
+
+        Returns the thread, so a test can wait for it rather than sleep and hope.
+        """
+        def guard():
+            try:
+                work(*args)
+            except Exception as exc:  # noqa: BLE001 — the whole point is to survive anything here
+                debug("background %r failed: %r" % (getattr(work, "__name__", work), exc))
+                self.window.setProperty("busy", False)
+                self.window.setProperty("status", "That did not work: %s" % exc)
+
+        thread = threading.Thread(target=guard, daemon=True)
+        thread.start()
+        return thread
 
     @Slot()
     def cancel(self):
@@ -319,7 +341,7 @@ class Bridge(QObject):
     @Slot()
     def loadSettings(self):
         self.window.setProperty("status", "Asking the engine…")
-        threading.Thread(target=self._load_settings, daemon=True).start()
+        self._in_background(self._load_settings)
 
     def _load_settings(self):
         code, state = get_json(self.api_base + "/v1/ai")
@@ -333,8 +355,7 @@ class Bridge(QObject):
     def saveSettings(self, provider, url, model, key):
         # A save failure must be visible, so the panel says it is working before the round trip.
         self.window.setProperty("status", "Saving…")
-        threading.Thread(target=self._save_settings, args=(provider, url, model, key),
-                         daemon=True).start()
+        self._in_background(self._save_settings, provider, url, model, key)
 
     def _save_settings(self, provider, url, model, key):
         body = {"provider": provider, "url": url, "model": model}
@@ -416,7 +437,7 @@ def main():
         # in the background, so the answer is on screen *before* the Rephrase button is clicked.
         # Only when there is an engine to ask and a rephrase row to explain (payload["api"] is what
         # canRephrase binds to, so the note and the row appear together or not at all).
-        threading.Thread(target=bridge.note_ai, daemon=True).start()
+        bridge._in_background(bridge.note_ai)
     if not settings_mode:
         # The keyboard route: a shortcut leaves a marker, and this process — the only one that can
         # answer for this card — turns it into the same action a click would. Cleared first, so only
