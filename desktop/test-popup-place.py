@@ -842,6 +842,105 @@ def test_live_keyboard():
         shutil.rmtree(cache, ignore_errors=True)
 
 
+def test_live_a_pressed_button_says_the_same_thing_as_the_key():
+    """The card's buttons, pressed for real — the one route the keyboard leg does not cover.
+
+    test_live_keyboard drives the card through grammar-action.py, which is what a shortcut runs, and
+    asserts the line the watcher parses. It never presses a button: the QML's own `onClicked` wiring is
+    the part nothing checked, and an Act renamed or left unwired would give a card whose only working
+    route is the keyboard — invisible to every gate in the repo, because the pure assertions test
+    grammar_core's helpers, not the QML that calls them.
+
+    Both routes are asserted against the *same* expected line on purpose: a click and a key must produce
+    one answer. The expectation is written out rather than built with action_json(), because a contract
+    asserted with the function that produces it cannot fail.
+
+    Opt-in, and the marker goes to a throwaway XDG_CACHE_HOME for the same reason as the keyboard leg:
+    the action written here must never be one the running watcher could pick up and act on.
+    """
+    if not os.environ.get("GRAMMAR_LIVE"):
+        print("  live button: skipped (GRAMMAR_LIVE=1 puts a real card on screen)")
+        return
+    if not os.environ.get("DISPLAY"):
+        print("  live button: skipped (no DISPLAY)")
+        return
+    try:
+        import gi
+        gi.require_version("Atspi", "2.0")
+        from gi.repository import Atspi
+    except (ValueError, ImportError):
+        # ValueError, not ImportError, when the typelib is absent: the same trap the watch gate
+        # carries a guard for. A CI runner has python3-gi and no at-spi2-core.
+        print("  live button: skipped (no at-spi typelib here)")
+        return
+
+    def app_for(pid):
+        desktop = Atspi.get_desktop(0)
+        for i in range(desktop.get_child_count()):
+            app = desktop.get_child_at_index(i)
+            if app is not None and app.get_process_id() == pid:
+                return app
+        return None
+
+    def button_named(node, name, depth=0):
+        """A named node that takes an action — a QML Button, found by what it says rather than by where
+        it is. Role names differ between toolkits; 'has something to activate' does not."""
+        if node is None or depth > 12:
+            return None
+        try:
+            if node.get_name() == name:
+                iface = node.get_action_iface()
+                if iface is not None and iface.get_n_actions() > 0:
+                    return node
+        except Exception:
+            pass
+        try:
+            for i in range(min(node.get_child_count(), 200)):
+                found = button_named(node.get_child_at_index(i), name, depth + 1)
+                if found is not None:
+                    return found
+        except Exception:
+            pass
+        return None
+
+    cache = tempfile.mkdtemp(prefix="grammar-button-live-")
+    env = dict(os.environ, XDG_CACHE_HOME=cache)
+    proc = subprocess.Popen(
+        [sys.executable, POPUP, "--x", "300", "--y", "300", "--old", "go", "--new", "goes",
+         "--reason", "Subject-verb agreement", "--timeout", "20"],
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env)
+    try:
+        # A window is not in the a11y tree the instant it exists, so poll rather than sleep and hope.
+        button, deadline = None, time.time() + 10
+        while button is None and time.time() < deadline:
+            button = button_named(app_for(proc.pid), "Fix sentence")
+            if button is None:
+                time.sleep(0.25)
+        ok(button is not None, "the card drew a button called 'Fix sentence' (pid %d)" % proc.pid)
+        if button is None:
+            return
+        iface = button.get_action_iface()
+        names = [iface.get_action_name(i) for i in range(iface.get_n_actions())]
+        press = "Press" if "Press" in names else (names[0] if names else None)
+        ok(press is not None, "and it can be activated from a11y: %r" % (names,))
+        iface.do_action(names.index(press))
+        try:
+            out, _ = proc.communicate(timeout=15)
+        except subprocess.TimeoutExpired:
+            # A button that is drawn but not wired does nothing, so the card sits until its own
+            # --timeout and the reader gets a bare TimeoutExpired. That timeout *is* the finding.
+            out = b""
+            ok(False, "the card answered nothing in 15 s — a drawn but unwired button does this"
+                      " (its own --timeout is what ended the wait)")
+        ok(out.decode().strip() == '{"action": "sentence"}',
+           "pressing it answers exactly what the keyboard answers, got %r" % out.decode().strip())
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=5)
+        shutil.rmtree(cache, ignore_errors=True)
+
+
 def main():
     try:
         popup = load_popup()
@@ -870,6 +969,7 @@ def main():
         test_provider_seam(popup, os.environ.get("GRAMMAR_API") or "http://127.0.0.1:8875")
     test_live()
     test_live_keyboard()
+    test_live_a_pressed_button_says_the_same_thing_as_the_key()
     # A gate that can pass having run nothing is not a gate. This one reported "0 assertions -
     # passed" in CI once, with a green tick, on a runner where the card's module could not even be
     # imported. If nothing ran, that is the finding.
