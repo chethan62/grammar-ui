@@ -56,6 +56,7 @@ function findingsFrom(body, text) {
     const after = alts.length ? alts[0] : null;
     return {
       message: match.message || "Finding",
+      rule: (match.rule && match.rule.id) || "",
       before: text.slice(offset, offset + length),
       after,
       alts,
@@ -94,10 +95,37 @@ function findingRow(finding) {
   fix.textContent = "Fix sentence";
   fix.addEventListener("click", () => fixSentence(finding));
 
+  // A word the checker itself should accept: every editor benefits, not just this window.
+  const word = /^[A-Za-z'’-]+$/.test(finding.before) ? finding.before : "";
+  const addToDictionary = document.createElement("button");
+  addToDictionary.className = "flat";
+  addToDictionary.textContent = "Add to dictionary";
+  addToDictionary.disabled = !word || finding.rule !== "MORFOLOGIK_RULE_EN_US";
+  addToDictionary.addEventListener("click", async () => {
+    addToDictionary.disabled = true;
+    try {
+      const answer = await call("/v2/dictionary", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ word }),
+      });
+      await check();
+      // The endpoint checks its own effect and says so, so this reports what happened rather than what
+      // was attempted: a word written but not picked up is a different outcome from one that took.
+      say(answer.accepted
+        ? "The checker now accepts " + word + "."
+        : "Saved " + word + ", but the checker still flags it — see " + answer.path, !answer.accepted);
+    } catch (error) {
+      addToDictionary.disabled = false;
+      say("Could not add " + word + ": " + error.message, true);
+    }
+  });
+
   const ignore = document.createElement("button");
   ignore.className = "flat";
   ignore.textContent = "Ignore this word";
-  ignore.disabled = !/[A-Za-z]/.test(finding.before);
+  // Only a single misspelled word, the same rule the host has always used (grammar_core.finding_word): a
+  // grammar rule that spans one word would otherwise hide that word in every later sentence.
+  ignore.disabled = !word || finding.rule !== "MORFOLOGIK_RULE_EN_US";
   ignore.addEventListener("click", async () => {
     ignore.disabled = true;
     try {
@@ -113,7 +141,7 @@ function findingRow(finding) {
     }
   });
 
-  div.append(label, ...applies, fix, ignore);
+  div.append(label, ...applies, fix, addToDictionary, ignore);
   return div;
 }
 
