@@ -42,6 +42,7 @@ Window {
     property var colors: ({})        // from the desktop's palette, via the host
     property var candidates: []      // the model's alternatives, filled by the host
     property var changes: []         // what each alternative changed: [[removed, added], ...]
+    property string streaming: ""    // the model's words, arriving, before the answers do
     property var settings: ({})      // GET /v1/ai, through the host
     property string view: "finding"  // "finding" | "settings"
     property string status: ""
@@ -286,6 +287,17 @@ Window {
                     }
                 }
             }
+            // The model's words as it writes them. Above the answers, because it is replaced by them
+            // when they land: with a local model the finished sentence can be two seconds away, and a
+            // card that says "Rephrasing…" for two seconds looks stuck.
+            Text {
+                width: parent.width
+                visible: card.streaming.length > 0
+                text: card.streaming
+                font.pixelSize: 12
+                color: card.c("muted", "#5a6472")
+                wrapMode: Text.WordWrap
+            }
             RowLayout {
                 width: parent.width
                 spacing: 6
@@ -293,19 +305,28 @@ Window {
                 ComboBox {
                     id: toneBox
                     Layout.preferredWidth: 124
+                    enabled: !card.busy
                     model: ["tone: as-is", "tone: professional", "tone: casual", "tone: formal"]
                 }
                 ComboBox {
                     id: intentBox
                     Layout.preferredWidth: 158
+                    enabled: !card.busy
                     model: ["rephrase as-is", "concise", "clear", "simple"]
                 }
                 Item { Layout.fillWidth: true }
+                // One button, two jobs: while a rephrase is running the useful thing to offer is
+                // stopping it, not starting another one.
                 Act {
-                    text: "Rephrase"
-                    enabled: !card.busy
+                    text: card.busy ? "Cancel" : "Rephrase"
                     onClicked: {
+                        if (card.busy) {
+                            bridge.cancel()
+                            card.status = "Stopping…"
+                            return
+                        }
                         card.busy = true
+                        card.streaming = ""
                         card.status = "Rephrasing… a local model takes a few seconds"
                         bridge.rephrase(toneBox.currentIndex, intentBox.currentIndex)
                     }

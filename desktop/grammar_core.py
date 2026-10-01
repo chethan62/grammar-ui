@@ -503,8 +503,13 @@ def card_colors(dark):
 # ---- the two HTTP calls the card makes (stdlib urllib, no display needed) ----------------------
 
 def rephrase_body(sentence, tone="", intent=""):
-    """The body for POST /v2/rewrite. Pure: the card's own contract with its server."""
-    body = {"text": sentence, "language": "en-US"}
+    """The body for POST /v2/rewrite. Pure: the card's own contract with its server.
+
+    `stream` is always asked for: the words then arrive as the model writes them, and a backend that
+    cannot stream answers in one body, which this client reads the same way. Asking costs nothing and
+    not asking means a card that sits still for two seconds.
+    """
+    body = {"text": sentence, "language": "en-US", "stream": True}
     if tone:
         body["tone"] = tone
     if intent:
@@ -589,6 +594,75 @@ def ai_note(provider, model, local, ms=None):
         return who
     where = "nothing leaves this machine" if local else "what you rephrase leaves this machine"
     return "%s — %s" % (who, where)
+
+
+def read_stream(lines):
+    """Turn the rewrite stream into events, without a socket in sight. Pure.
+
+    Yields ("delta", text) while the model writes, then ("done", response) or ("error", message). Lines
+    are told apart by *which key is present*, never by position or count: a backend that ignores the
+    stream flag answers in one body, and that body arrives here as a single line carrying candidates —
+    so asking to stream is never a way to break a call, and this is the reason it cannot be.
+
+    A line that is not an object with one of those keys is an error rather than something to skip: it
+    means the framing broke, and a half-read sentence presented as an answer is worse than a failure.
+    """
+    for raw in lines:
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            event = json.loads(raw)
+        except ValueError:
+            yield ("error", "the rewrite stream was unreadable: %s" % raw[:120])
+            return
+        if not isinstance(event, dict):
+            yield ("error", "the rewrite stream sent %r, which is not an object" % raw[:120])
+            return
+        if event.get("message"):
+            yield ("error", str(event["message"]))
+            return
+        if event.get("delta"):
+            yield ("delta", str(event["delta"]))
+            continue
+        if "candidates" in event:
+            yield ("done", event)
+            return
+    yield ("error", "the rewrite stream ended without an answer")
+
+
+def stream_rewrite(url, body, on_delta=None, timeout=REPHRASE_TIMEOUT, should_stop=None):
+    """POST /v2/rewrite asking for the answer as it is written, handing the words over as they come.
+
+    Returns (status, final) exactly like post_json, so a caller's handling of the answer does not
+    depend on how it arrived. `should_stop` is asked between lines: when it says yes the connection is
+    dropped, which is also how the model is stopped — the request's context reaches the backend, so
+    there is no second cancel path to keep in step.
+    """
+    request = urllib.request.Request(
+        url, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"},
+        method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            for kind, value in read_stream(response):
+                if should_stop is not None and should_stop():
+                    return 200, {"message": "cancelled"}
+                if kind == "delta":
+                    if on_delta is not None:
+                        on_delta(value)
+                    continue
+                if kind == "error":
+                    return response.status, {"message": value}
+                return response.status, value
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode(errors="replace")
+        try:
+            return exc.code, json.loads(raw)
+        except ValueError:
+            return exc.code, {}
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        return 0, {"message": "cannot reach the engine at %s (%s)" % (url, exc)}
+    return 0, {"message": "the rewrite stream ended unexpectedly"}
 
 
 def post_json(url, body, timeout=REPHRASE_TIMEOUT):

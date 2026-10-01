@@ -24,6 +24,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 # The same guard test-watch.py carries, for the same reason: `make test` calls `python3`,
@@ -206,10 +207,12 @@ def test_payload(popup):
 
     # The rephrase the card now makes itself: the request it builds, and how it reads the answer.
     ok(popup.rephrase_body("Fine.", "professional", "concise")
-       == {"text": "Fine.", "language": "en-US", "tone": "professional", "intent": "concise"},
-       "the rephrase body carries the sentence, the tone and the intent")
-    ok(popup.rephrase_body("Fine.") == {"text": "Fine.", "language": "en-US"},
-       "and leaves tone and intent out when none is chosen: %r" % popup.rephrase_body("Fine."))
+       == {"text": "Fine.", "language": "en-US", "stream": True, "tone": "professional",
+           "intent": "concise"},
+       "the rephrase body carries the sentence, the tone, the intent and asks to stream")
+    ok(popup.rephrase_body("Fine.") == {"text": "Fine.", "language": "en-US", "stream": True},
+       "and leaves tone and intent out when none is chosen, while still asking to stream: %r"
+       % popup.rephrase_body("Fine."))
     ok(popup.candidates_from({"candidates": ["A.", "B.", "A.", "  "], "model": "m"}) == ["A.", "B."],
        "the model's alternatives come back de-duplicated and trimmed: %r"
        % popup.candidates_from({"candidates": ["A.", "B.", "A.", "  "]}))
@@ -465,14 +468,14 @@ def test_the_card_is_given_the_changes(popup):
     sentence = "It is very important that we do so."
     bridge = popup.Bridge(window, {"api": "http://127.0.0.1:9", "sentence": sentence}, None,
                           "http://127.0.0.1:9")
-    real_post = popup.post_json
-    popup.post_json = lambda url, body: (200, {"candidates": ["It is crucial that we do so.",
-                                                             "We must do so now."],
-                                              "provider": "ollama", "model": "m", "elapsedMs": 12})
+    real_post = popup.stream_rewrite
+    popup.stream_rewrite = lambda url, body, on_delta=None, **kw: (
+        200, {"candidates": ["It is crucial that we do so.", "We must do so now."],
+              "provider": "ollama", "model": "m", "elapsedMs": 12})
     try:
         bridge._work("", "concise")
     finally:
-        popup.post_json = real_post
+        popup.stream_rewrite = real_post
 
     changes = window.property("changes")
     ok(len(changes) == 2, "one diff per answer, and both answers are there: %r" % (changes,))
@@ -483,6 +486,106 @@ def test_the_card_is_given_the_changes(popup):
     ok(all(len(pair) == 2 for pair in changes), "each diff is a removed half and an added half")
     ok(window.property("candidates") == ["It is crucial that we do so.", "We must do so now."],
        "and the answers themselves are unchanged by any of this")
+
+
+def test_stream_reader(popup):
+    """The rewrite stream, parsed: the words as they arrive, then the answer.
+
+    Which kind of line it is must be decided by which key is present, never by position or count — a
+    backend that ignores the stream flag answers in one body, and that body has to be accepted. Each
+    case here is a shape that decision can be got wrong on.
+    """
+    events = list(popup.read_stream(['{"delta": "We are "}', '{"delta": "reviewing."}',
+                                     '{"candidates": ["We are reviewing."], "model": "m"}']))
+    ok(events[0] == ("delta", "We are ") and events[1] == ("delta", "reviewing."),
+       "each delta comes through in order: %r" % (events,))
+    ok(events[2][0] == "done" and events[2][1]["candidates"] == ["We are reviewing."],
+       "and the answer ends it: %r" % (events[2],))
+    ok(len(events) == 3, "with nothing after the answer: %r" % (events,))
+
+    # A backend that ignored `stream`: one body, one line, still an answer.
+    one = list(popup.read_stream(['{"candidates": ["We are reviewing."], "model": "m"}']))
+    ok(len(one) == 1 and one[0][0] == "done",
+       "a single-body reply is read as the answer, not as a delta with no end: %r" % (one,))
+
+    # Blank lines are framing, not content.
+    ok(list(popup.read_stream(["", "   ", '{"candidates": []}']))[0][0] == "done",
+       "blank lines are skipped rather than mistaken for an answer")
+
+    fail = list(popup.read_stream(['{"delta": "We are "}', '{"message": "rewrite timed out"}']))
+    ok(fail[-1] == ("error", "rewrite timed out"),
+       "the server's own sentence is what a failure reports: %r" % (fail[-1],))
+
+    # Not skipped: a line that is neither is a broken frame, and a half-sentence shown as an answer
+    # is worse than a failure.
+    for junk in ("<html>502</html>", '["not", "an", "object"]'):
+        got = list(popup.read_stream([junk]))
+        ok(got and got[0][0] == "error", "junk line %r is an error: %r" % (junk, got))
+    ok(list(popup.read_stream(["", ""]))[0][0] == "error",
+       "a stream that ends without an answer is an error, not an empty success")
+
+
+def test_streaming_rewrite(popup):
+    """The streaming call itself, against a server that speaks the shape the engine sends.
+
+    The cancel case is the one worth having: the plan asks for a Cancel button, and the only thing that
+    makes it work is the reader noticing between lines and dropping the connection — which is also what
+    stops the model at the other end.
+    """
+    import http.server
+
+    def serve(lines, delay=0.0):
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.send_response(200)
+                self.send_header("Content-Type", "application/x-ndjson")
+                self.end_headers()
+                for line in lines:
+                    self.wfile.write(("%s\n" % line).encode())
+                    self.wfile.flush()
+                    if delay:
+                        time.sleep(delay)
+
+            def log_message(self, *args):
+                pass
+
+        srv = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        return srv, "http://127.0.0.1:%d" % srv.server_address[1]
+
+    srv, url = serve(['{"delta": "We are "}', '{"delta": "reviewing."}',
+                      '{"candidates": ["We are reviewing."], "model": "m", "provider": "ollama"}'])
+    try:
+        seen = []
+        status, final = popup.stream_rewrite(url, {"text": "x"}, seen.append)
+        ok(status == 200 and final.get("candidates") == ["We are reviewing."],
+           "the answer comes back like post_json's does: %r" % (final,))
+        ok(seen == ["We are ", "reviewing."], "and the words were handed over as they arrived: %r" % (seen,))
+    finally:
+        srv.shutdown()
+
+    srv, url = serve(['{"delta": "one"}', '{"delta": "two"}', '{"delta": "three"}',
+                      '{"candidates": ["three"]}'], delay=0.05)
+    try:
+        seen = []
+        status, final = popup.stream_rewrite(url, {"text": "x"}, seen.append,
+                                             should_stop=lambda: len(seen) >= 1)
+        ok(final.get("message") == "cancelled", "a stop between lines ends the read: %r" % (final,))
+        ok(len(seen) == 1, "and does not wait for the rest of the stream: %r" % (seen,))
+    finally:
+        srv.shutdown()
+
+    srv, url = serve(['{"message": "rewrite backend unavailable (ollama at http://x) — start it"}'])
+    try:
+        _status, final = popup.stream_rewrite(url, {"text": "x"})
+        ok("unavailable" in (final.get("message") or ""),
+           "a failure after the status line arrives as a message: %r" % (final,))
+    finally:
+        srv.shutdown()
+
+    got = popup.stream_rewrite("http://127.0.0.1:9/v2/rewrite", {"text": "x"})
+    ok(got[0] == 0 and "cannot reach" in got[1].get("message", ""),
+       "and an engine that is not there reads the same way post_json's failure does: %r" % (got,))
 
 
 def test_live():
@@ -673,6 +776,8 @@ def main():
         test_provider_note(popup)
         test_change_summary(popup)
         test_the_card_is_given_the_changes(popup)
+        test_stream_reader(popup)
+        test_streaming_rewrite(popup)
         # The seam needs an engine to ask, and skips itself where there is none — the same shape as
         # the live leg below, minus the screen.
         test_provider_seam(popup, os.environ.get("GRAMMAR_API") or "http://127.0.0.1:8875")
