@@ -71,6 +71,12 @@ if (modelRows[1].after !== null) throw new Error("a finding with no replacements
 // the bug that shipped: an object read as a string renders as "[object Object]" on every button
 if (modelRows[0].after !== "the") throw new Error(`replacement object not read: got ${modelRows[0].after}`);
 if (modelRows[2].after !== "they") throw new Error(`string replacement not read: got ${modelRows[2].after}`);
+// every alternative, not just the first: harper's first pick for "wurd" is "ward" while "word" is third
+const many = findingsFrom({ matches: [{ message: "x", offset: 0, length: 3,
+  replacements: [{ value: "ward" }, { value: "word" }, { value: "we'd" }] }] }, "wrd");
+if (many[0].alts.length !== 3) throw new Error(`expected 3 alternatives, got ${many[0].alts.length}`);
+if (many[0].alts.join(",") !== "ward,word,we'd") throw new Error(`alternatives wrong: ${many[0].alts}`);
+if (many[0].after !== "ward") throw new Error("after must stay the engine's first pick");
 if (findingsFrom({}, emojiText).length !== 0) throw new Error("a response with no matches must be no rows");
 if (findingsFrom({ matches: [{ message: "x", offset: 9999, length: 4, replacements: [] }] }, emojiText).length !== 1) {
   throw new Error("an out-of-range offset must still be a row, not a crash");
