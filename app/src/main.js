@@ -51,7 +51,7 @@ async function load() {
     $("words").replaceChildren(...words.map(row));
     $("wordsNote").textContent = words.length
       ? "The engine stops reporting these; removing one brings the findings back."
-      : "Nothing is ignored. Add a word from a suggestion's \"Ignore this word\".";
+      : "Nothing is ignored yet.";
 
     const presets = (ai.presets || []).slice();
     if (!presets.some((p) => p.name === ai.provider)) {
@@ -99,6 +99,35 @@ $("provider").addEventListener("change", () => {
   const picked = $("provider").selectedOptions[0];
   if (picked) { $("url").value = picked.dataset.url; $("model").value = picked.dataset.model; }
 });
+
+// Adding a word used to be the card's job. With the card gone this window is the only place it can
+// happen, so the field is here rather than left to curl.
+async function addWord() {
+  const word = $("newWord").value.trim();
+  if (!word) return;
+  $("add").disabled = true;
+  try {
+    await call("/v2/ignore", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ word }),
+    });
+    $("newWord").value = "";
+    await load();
+    say("Now ignoring " + word + ".");
+  } catch (error) {
+    say("Could not add " + word + ": " + error.message, true);
+  } finally {
+    $("add").disabled = false;
+  }
+}
+$("add").addEventListener("click", addWord);
+$("newWord").addEventListener("keydown", (event) => { if (event.key === "Enter") addWord(); });
+
+// A card, a shell command or another machine can change either list while this is open, and the whole
+// point of the window is to show those two lists. Reloading when it regains focus lands exactly when
+// someone is about to read it. It is only safe because this is a normal window: the old panel could
+// not do this without repainting under the user's hands.
+window.addEventListener("focus", load);
 
 $("test").addEventListener("click", load);        // the same round trip: /v1/ai asks the backend
 
