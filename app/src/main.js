@@ -6,7 +6,10 @@ const ENGINE = localStorage.getItem("grammar-api") || "http://127.0.0.1:8875";
 const $ = (id) => document.getElementById(id);
 
 async function call(path, options) {
-  const response = await fetch(ENGINE + path, options);
+  // `fetch` has no timeout: without one, an engine that accepts the connection and never answers
+  // leaves this window reading "reading…" with every button live and nothing to click. Six seconds is
+  // longer than the slowest thing here (a cold model list) and short enough to say so out loud.
+  const response = await fetch(ENGINE + path, { signal: AbortSignal.timeout(6000), ...options });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || (path + " answered " + response.status));
   return body;
@@ -91,7 +94,9 @@ async function load() {
       : (ai.reachable ? "answering — " + (ai.models || []).length + " models"
                       : "configured, not answering"));
   } catch (error) {
-    say("No engine at " + ENGINE + " — " + error.message, true);
+    say(error.name === "TimeoutError"
+        ? "The engine at " + ENGINE + " did not answer within 6 s."
+        : "No engine at " + ENGINE + " — " + error.message, true);
   }
 }
 
