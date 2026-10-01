@@ -51,6 +51,7 @@ test can tell placement from luck.
 
 import json
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -71,11 +72,13 @@ import urllib.request
 # its directory on the path, so a plain `import grammar_core` would fail there while working when
 # the script is run directly.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from grammar_core import (CARET_GAP, KEYBOARD_ACTIONS, MAX_CANDIDATES, MAX_CHIPS, REPHRASE_TIMEOUT,
+from grammar_core import (CARET_GAP, KEYBOARD_ACTIONS, MAX_CANDIDATES, MAX_CHIPS, MAX_SETTING_ROWS,
+                         REPHRASE_TIMEOUT,
                          TONES, INTENTS, DEFAULT_API, action_json, ai_note, api_error_message,
-                         candidates_from, card_colors, change_summary, clamp, clear_card_action,
-                         get_json, parse_payload, post_json, read_stream, rephrase_body, settings_view,
-                         stream_rewrite, take_card_action)
+                         blocked_apps, candidates_from, card_colors, change_summary, clamp,
+                         clear_card_action, get_json, parse_payload, post_json, read_blocked,
+                         read_stream, rephrase_body, settings_view,
+                         stream_rewrite, take_card_action, paused_until)
 
 
 
@@ -93,6 +96,20 @@ except Exception as exc:  # noqa: BLE001 - any failure here means "use a notific
     sys.exit(2)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def pause_command():
+    """The pause/blocklist CLI, wherever it is installed.
+
+    It owns the two files that are not the engine's, so the panel calls it rather than growing a second
+    writer that could disagree about the empty case. Same search order the client loader uses: beside
+    this file first (the repo copy, and the installed one the unit runs), then the installed name.
+    """
+    for path in (os.path.join(HERE, "grammar-pause.py"), os.path.join(HERE, "grammar-pause"),
+                 os.path.expanduser("~/.local/bin/grammar-pause")):
+        if os.path.exists(path):
+            return path
+    return ""
 
 # Diagnostics go to stderr, never stdout: stdout is this process's answer channel (one JSON line the
 # watcher reads), so a debug print there would be mistaken for an action. Off unless asked for, and
@@ -343,11 +360,73 @@ class Bridge(QObject):
         self.window.setProperty("status", "Asking the engine…")
         self._in_background(self._load_settings)
 
+    # ---- the rest of the settings: the ignore list, the pauses -------------------------------
+    # Each of these changes something that has exactly one owner — the engine owns the ignored words,
+    # the pause CLI owns the two files it was written for — and then asks for the state again instead
+    # of assuming the write worked. A panel that trusted its own click would show a word it had failed
+    # to remove, which is the one thing a list of your own choices must never do.
+    @Slot(str)
+    def dropWord(self, word):
+        self._in_background(self._drop_word, word)
+
+    def _drop_word(self, word):
+        code, answer = post_json(self.api_base + "/v2/ignore", {"word": word, "forget": True})
+        if code != 200:
+            self.window.setProperty("status", api_error_message(answer, code))
+            return
+        self._load_settings()
+
+    @Slot(str)
+    def resumeApp(self, app):
+        self._in_background(self._pause_cli, ["--unblock", app])
+
+    @Slot()
+    def pauseHour(self):
+        self._in_background(self._pause_cli, ["1h"])
+
+    @Slot()
+    def resumeNow(self):
+        self._in_background(self._pause_cli, ["off"])
+
+    def _pause_cli(self, args):
+        """One command, then the state again.
+
+        The CLI owns those files and its own words for a refusal (exit 1 when there was nothing of the
+        user's to undo), and those words belong on the panel rather than in a log nobody reads.
+        """
+        command = pause_command()
+        if not command:
+            self.window.setProperty("status", "grammar-pause is not installed next to this panel")
+            return
+        done = subprocess.run([sys.executable, command] + args, capture_output=True, text=True,
+                              timeout=10)
+        message = (done.stderr or done.stdout).strip()
+        self.window.setProperty("status", message if message else "")
+        if done.returncode != 0:
+            return
+        self._load_settings()
+
     def _load_settings(self):
         code, state = get_json(self.api_base + "/v1/ai")
         if code == 200:
-            self.window.setProperty("settings", settings_view(state))
-            self.window.setProperty("status", "")
+            # The settings that are not the AI runner's, gathered into one state so the panel draws
+            # once. Read rather than cached: a card's "Ignore this word" button, or the pause CLI run
+            # from a shortcut, can change them while this panel is open.
+            extra = {"words": [], "wordsPath": ""}
+            words_status = ""      # a successful load has nothing to report — including that it worked
+            words_code, words_answer = get_json(self.api_base + "/v2/ignore")
+            if words_code == 200 and isinstance(words_answer, dict):
+                extra = {"words": words_answer.get("words") or [],
+                         "wordsPath": words_answer.get("path") or ""}
+            else:
+                # An engine that cannot list them is not a panel that shows nothing: it says so, the
+                # way every other engine failure in this file is said.
+                words_status = api_error_message(words_answer, words_code)
+            extra.update(pausedApps=blocked_apps(read_blocked()), pauseUntil=paused_until())
+            self.window.setProperty("settings", settings_view(dict(state, **extra)))
+            # Written once, last: "Asking the engine…" is stale the moment this succeeds, and the words
+            # failure above must not be wiped by a later clear.
+            self.window.setProperty("status", words_status)
         else:
             self.window.setProperty("status", api_error_message(state, code))
 

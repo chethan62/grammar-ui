@@ -565,6 +565,92 @@ Window {
                 }
             }
 
+            // ---- the settings that used to have no window at all -----------------------------
+            // A word could be added from a card's "Ignore this word" and only a text editor could take
+            // it back; "Ignore in <application>" had exactly the same problem. They live here now, so
+            // one window holds every setting this product has — which is why the panel exists and a
+            // menu does not.
+            Rule {}
+
+            Field {
+                label: "IGNORED WORDS"
+                note: {
+                    if (!card.s("words", []).length)
+                        return "Nothing ignored yet. \"Ignore this word\" on a card adds one."
+                    var more = card.s("wordsMore", 0)
+                    return (more > 0 ? (more + " more in " + card.s("wordsPath", "") + ". ") : "")
+                           + "The engine stops reporting these; removing one brings the findings back."
+                }
+                Repeater {
+                    model: card.s("words", [])
+                    delegate: RowLayout {
+                        width: parent.width
+                        spacing: 6
+                        Text {
+                            // Layout.fillWidth, not an arithmetic width: a long ignored word has to
+                            // shorten itself rather than push its own button off the panel. Measured
+                            // on the first attempt — "Allow flibbertigibbet" came out clipped.
+                            Layout.fillWidth: true
+                            text: modelData
+                            font.pixelSize: 12
+                            color: card.c("muted", "#5a6472")
+                            elide: Text.ElideRight
+                        }
+                        Act {
+                            flat: true
+                            // The name is the action and the word. A column of buttons all called
+                            // "Remove" is a list no one — screen reader or gate — can tell apart.
+                            text: "Allow " + modelData
+                            Accessible.description: "Stop ignoring " + modelData
+                            onClicked: bridge.dropWord(modelData)
+                        }
+                    }
+                }
+            }
+
+            Rule {}
+
+            Field {
+                label: "PAUSED APPLICATIONS"
+                note: card.s("pausedApps", []).length
+                      ? "Checked nowhere until you resume them. Password managers and terminals are "
+                        + "always left alone and are not listed."
+                      : "Nothing paused. \"Ignore in <application>\" on a card pauses one."
+                Repeater {
+                    model: card.s("pausedApps", [])
+                    delegate: RowLayout {
+                        width: parent.width
+                        spacing: 6
+                        Text {
+                            Layout.fillWidth: true
+                            text: modelData
+                            font.pixelSize: 12
+                            color: card.c("muted", "#5a6472")
+                            elide: Text.ElideRight
+                        }
+                        Act {
+                            flat: true
+                            text: "Resume " + modelData
+                            Accessible.description: "Check in " + modelData + " again"
+                            onClicked: bridge.resumeApp(modelData)
+                        }
+                    }
+                }
+            }
+
+            Rule {}
+
+            Field {
+                label: "PAUSE"
+                note: card.s("pauseNote", "not paused")
+                Row {
+                    width: parent.width
+                    spacing: 6
+                    Act { text: "Pause for an hour"; onClicked: bridge.pauseHour() }
+                    Act { text: "Check again now"; onClicked: bridge.resumeNow() }
+                }
+            }
+
             Rule {}
 
             RowLayout {

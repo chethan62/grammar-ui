@@ -156,6 +156,10 @@ def parse_reply(text):
 
 MAX_CHIPS = 6          # a card, not a menu: the engine's first few are the useful ones
 MAX_CANDIDATES = 3     # the model's alternatives, shown as rows in the rephrase section
+# The settings panel draws at most this many rows per list. It cannot scroll — it is a window that
+# sizes to its content — so an uncapped list would eventually be taller than the screen. Raise it (and
+# give the panel a ScrollView) if a real list ever turns out longer than this.
+MAX_SETTING_ROWS = 6
 REPHRASE_TIMEOUT = 90  # a cold local model on this CPU has taken 6s; the server caps it anyway
 TONES = ("", "professional", "casual", "formal")
 INTENTS = ("", "concise", "clear", "simple")
@@ -250,6 +254,21 @@ def blocked_apps(text):
 def block_list(text):
     """The list in force: the defaults, plus whatever the user has added."""
     return list(BLOCKED_ALWAYS) + blocked_apps(text)
+
+
+def read_blocked(path=None):
+    """The blocklist file as text. A missing file is an empty list, not an error: nothing paused is the
+    normal state, and a panel that could not draw itself over a missing file would be worse than one
+    that draws nothing.
+
+    The *user's* lines are what a settings screen may offer to undo — `block_list` also carries the
+    defaults, and those are deliberate and cannot be removed from here.
+    """
+    try:
+        with open(path or BLOCKED_PATH) as fh:
+            return fh.read()
+    except OSError:
+        return ""
 
 
 def app_blocked(app, listed):
@@ -384,6 +403,23 @@ def debounce_ms(last_engine_ms):
     if last_engine_ms < 250:
         return 900
     return 1500
+
+
+def pause_note(until, now=None):
+    """When suggestions come back, in words.
+
+    A timestamp is not an answer to "why is it quiet?": this is what a panel says instead of a number,
+    and the phrase for "not paused" is deliberately the same one the tray used to print.
+    """
+    now = time.time() if now is None else now
+    left = int(until) - int(now)
+    if left <= 0:
+        return "not paused"
+    if left < 90:
+        return "paused for another %d seconds" % left
+    if left < 5400:
+        return "paused for another %d minutes" % round(left / 60.0)
+    return "paused for another %d hours" % round(left / 3600.0)
 
 
 def finding_word(piece, offset, match):
@@ -808,6 +844,18 @@ def settings_view(state):
     else:
         status = "not answering at %s" % (state.get("url") or "the address")
         tone = "bad"
+    # ---- the rest of this product's settings, so one window can hold them all ----
+    # They come from three places — the engine owns the ignored words, this client owns the blocklist
+    # and the pause — and every one of them already has a reader somewhere else: the watcher reads the
+    # blocklist per check, the engine filters by its own list. Nothing here decides anything; it
+    # arranges what those readers already know, which is why the panel needs no state of its own.
+    #
+    # Both lists are capped. The panel cannot scroll (it is a window that sizes to its content), so a
+    # list nobody capped would eventually be a window taller than the screen — and the count of what is
+    # left, with the file that holds it, is more useful than a wall of rows anyway.
+    words = sorted({str(w) for w in (state.get("words") or []) if str(w).strip()}, key=str.lower)
+    apps = sorted({str(a) for a in (state.get("pausedApps") or []) if str(a).strip()}, key=str.lower)
+
     return {"provider": provider, "url": str(state.get("url") or ""),
             "model": str(state.get("model") or ""), "presets": presets, "models": models,
             "hint": str(state.get("hint") or ""), "warnings": warnings,
@@ -816,4 +864,10 @@ def settings_view(state):
             "keyEnv": key_env, "keySet": key_set, "needsKey": bool(key_env),
             # What the key field says under it. The value itself is never sent anywhere: the
             # server accepts one and reports only whether it has one, and now where it keeps it.
-            "keyNote": key_note(key_set, key_env, str(state.get("keySource") or ""))}
+            "keyNote": key_note(key_set, key_env, str(state.get("keySource") or "")),
+            # ---- the rest of this product's settings, so one window can hold them all ----
+            "words": words[:MAX_SETTING_ROWS],
+            "wordsMore": max(0, len(words) - MAX_SETTING_ROWS),
+            "wordsPath": str(state.get("wordsPath") or ""),
+            "pausedApps": apps[:MAX_SETTING_ROWS],
+            "pauseNote": pause_note(state.get("pauseUntil") or 0)}

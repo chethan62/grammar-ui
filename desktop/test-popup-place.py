@@ -673,6 +673,43 @@ def test_a_background_failure_is_not_silent(popup):
        "while a body that works leaves whatever the last message was alone")
 
 
+def test_settings_holds_everything(popup):
+    """The panel is the one window for every setting, so its view must carry them all.
+
+    Each comes from a different owner — the engine's ignore list, this client's blocklist, a pause
+    timestamp — and two of them had no surface at all before: a word could be added from a card and only
+    a text editor could take it back, and "Ignore in <application>" had the same problem. What this pins
+    is that the view carries them, sorted and capped, and that it says where the rest are instead of
+    quietly dropping what did not fit.
+    """
+    view = popup.settings_view({"provider": "ollama", "url": "u", "model": "m",
+                                "words": ["Zorbulating", "kanban", "tea", "Tech", "zebra", "alpha",
+                                          "beta", "gamma"],
+                                "wordsPath": "/tmp/ignored-words",
+                                "pausedApps": ["Kate", "Firefox"], "pauseUntil": 0})
+    ok(len(view["words"]) == popup.MAX_SETTING_ROWS, "the list is capped: %d" % len(view["words"]))
+    ok(view["wordsMore"] == 2, "and the rest are counted, not dropped: %r" % view["wordsMore"])
+    ok(view["wordsPath"] == "/tmp/ignored-words",
+       "with the file that holds them, because that is where the rest are")
+    ok(view["words"] == ["alpha", "beta", "gamma", "kanban", "tea", "Tech"],
+       "sorted the way a person reads a list: %r" % view["words"])
+    ok(view["pausedApps"] == ["Firefox", "Kate"], "the paused applications: %r" % view["pausedApps"])
+    ok(view["pauseNote"] == "not paused", "an expired pause reads as none: %r" % view["pauseNote"])
+
+    paused = popup.settings_view({"pauseUntil": time.time() + 3600})
+    ok(paused["pauseNote"].startswith("paused for another"),
+       "a real pause says how long: %r" % paused["pauseNote"])
+    ok(popup.settings_view({})["words"] == [] and popup.settings_view({})["pausedApps"] == [],
+       "and a panel with none of it still has the keys the QML reads")
+
+    # The other half of the seam, the one that would go unnoticed: a key renamed on the view side is a
+    # blank row on the panel, and nothing else in the gates would say a word about it.
+    qml = open(os.path.join(HERE, "grammar-card.qml")).read()
+    for key in ("words", "wordsMore", "wordsPath", "pausedApps", "pauseNote"):
+        ok(('"%s"' % key) in qml,
+           "the panel draws %r, so renaming either side cannot pass silently" % key)
+
+
 def test_live():
     """The card in a real process, placed for real, reporting from the X server.
 
@@ -967,6 +1004,7 @@ def main():
         # The seam needs an engine to ask, and skips itself where there is none — the same shape as
         # the live leg below, minus the screen.
         test_provider_seam(popup, os.environ.get("GRAMMAR_API") or "http://127.0.0.1:8875")
+    test_settings_holds_everything(popup)
     test_live()
     test_live_keyboard()
     test_live_a_pressed_button_says_the_same_thing_as_the_key()
