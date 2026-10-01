@@ -32,7 +32,9 @@
   }
 }
 * { box-sizing:border-box; }
-body { margin:0; padding:var(--s3); background:var(--surface); color:var(--text);
+/* padding-bottom clears the fixed footer above (its 32px control + 16px border gap + its 16px
+   offset) so the last row of a long list is never behind it. */
+body { margin:0; padding:var(--s3); padding-bottom:72px; background:var(--surface); color:var(--text);
        font-family:"Inter","Noto Sans",system-ui,sans-serif; font-size:var(--t-body); line-height:1.5; }
 
 /* ---- header ---------------------------------------------------------------------------------- */
@@ -81,5 +83,13 @@ select { appearance:none; -webkit-appearance:none; padding-right:28px; backgroun
 
 /* ---- footer: the status speaks, one button acts ------------------------------------------------ */
 .foot { display:flex; align-items:center; gap:var(--s2); margin-top:var(--s4); padding-top:var(--s3);
-        border-top:1px solid var(--border); }
+        border-top:1px solid var(--border);
+        /* Fixed, not sticky: this window's own config allows it to shrink to 420px tall, and at that size
+           the status and Save were below the fold with nothing saying so (measured at 460x420 with an empty
+           word list — OCR found the header and nothing else). Sticky was tried first and did nothing, which
+           is correct behaviour: a sticky element only offsets within its containing block, and the last
+           child of body has nothing below it. Fixed is anchored to the viewport, so body needs the
+           clearance below or the last word would sit under it. */
+        position:fixed; left:var(--s3); right:var(--s3); bottom:var(--s3); margin-top:0;
+        background:var(--surface); }
 .foot .status { flex:1; color:var(--muted); }
