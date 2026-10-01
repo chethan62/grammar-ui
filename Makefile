@@ -24,22 +24,32 @@ install:
 	install -m755 desktop/grammar-watch.py $(BINDIR)/grammar-watch
 	install -m755 desktop/grammar-popup.py $(BINDIR)/grammar-popup.py
 	install -m755 desktop/grammar-doctor.py $(BINDIR)/grammar-doctor
+	install -m755 desktop/grammar-action.py $(BINDIR)/grammar-action
 	install -m644 desktop/grammar_core.py $(BINDIR)/grammar_core.py
 	install -m644 desktop/grammar-card.qml $(BINDIR)/grammar-card.qml
 	sed 's|@BINDIR@|$(BINDIR)|' deployments/grammar-lookup.desktop > $(APPDIR)/grammar-lookup.desktop
 	sed 's|@BINDIR@|$(BINDIR)|' deployments/grammar-settings.desktop > $(APPDIR)/grammar-settings.desktop
-	chmod 644 $(APPDIR)/grammar-lookup.desktop $(APPDIR)/grammar-settings.desktop
+	sed 's|@BINDIR@|$(BINDIR)|' deployments/grammar-accept.desktop > $(APPDIR)/grammar-accept.desktop
+	sed 's|@BINDIR@|$(BINDIR)|' deployments/grammar-dismiss.desktop > $(APPDIR)/grammar-dismiss.desktop
+	chmod 644 $(APPDIR)/grammar-lookup.desktop $(APPDIR)/grammar-settings.desktop \
+	          $(APPDIR)/grammar-accept.desktop $(APPDIR)/grammar-dismiss.desktop
 	-update-desktop-database $(APPDIR) 2>/dev/null
 	-systemctl --user daemon-reload
-	@echo "Installed $(BINDIR)/grammar-{lookup,watch} and grammar-popup.py, plus the watcher unit."
+	@echo "Installed $(BINDIR)/grammar-{lookup,watch,action} and grammar-popup.py, plus the watcher unit."
 	@echo "  systemctl --user enable --now grammar-watch   # suggestions as you type, anywhere"
-	@echo "The selection checker is bound to Ctrl+Alt+C (see the README); the binding takes"
-	@echo "effect at the next login, because kglobalaccel reads its config when it starts."
+	@echo "Shortcuts are yours to choose (System Settings -> Shortcuts), and binding them is a"
+	@echo "manual step: this Makefile writes no keys, whatever an older README said. Suggested:"
+	@echo "  Ctrl+Alt+C       Check my selection        (grammar-lookup)"
+	@echo "  Ctrl+Alt+Return  Accept the suggestion     (grammar-action accept)"
+	@echo "  Ctrl+Alt+Escape  Dismiss the suggestion    (grammar-action dismiss)"
+	@echo "A binding takes effect at the next login: kglobalaccel reads its config when it starts."
 
 uninstall:
 	-systemctl --user disable --now grammar-watch
 	rm -f $(UNITDIR)/grammar-watch.service
 	rm -f $(BINDIR)/grammar-lookup $(BINDIR)/grammar-watch $(BINDIR)/grammar-popup.py
-	rm -f $(APPDIR)/grammar-lookup.desktop
+	rm -f $(BINDIR)/grammar-action
+	rm -f $(APPDIR)/grammar-lookup.desktop $(APPDIR)/grammar-settings.desktop
+	rm -f $(APPDIR)/grammar-accept.desktop $(APPDIR)/grammar-dismiss.desktop
 	-update-desktop-database $(APPDIR) 2>/dev/null
 	-systemctl --user daemon-reload

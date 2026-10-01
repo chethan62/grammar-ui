@@ -23,6 +23,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 # The same guard test-watch.py carries, for the same reason: `make test` calls `python3`,
@@ -425,6 +426,88 @@ def test_live():
         # search does not dismiss a window), and while a card was up it picked the wrong one.
 
 
+def test_keyboard(popup):
+    """The marker a shortcut leaves, and the card that consumes it.
+
+    The card can never take the keyboard, so this little file is the entire interface between a
+    shortcut and the card's answer — which means it has to stay safe when the marker is stale, when
+    the verb is a typo, and when one press could otherwise be counted twice.
+    """
+    import grammar_core                     # the pop-up puts its own directory on sys.path as it loads
+    path = os.path.join(tempfile.mkdtemp(prefix="grammar-action-"), "card-action")
+    ok(grammar_core.take_card_action(path) is None, "no marker is no action")
+    ok(grammar_core.write_card_action("accept", path) is True, "a shortcut can leave one")
+    ok(grammar_core.take_card_action(path) == "accept", "and the card reads it")
+    ok(grammar_core.take_card_action(path) is None,
+       "reading it consumes it, so one press cannot be applied twice")
+    ok(grammar_core.write_card_action("dismiss", path) is True
+       and grammar_core.take_card_action(path) == "dismiss", "dismiss is a verb too")
+    ok(grammar_core.write_card_action("nonsense", path) is False,
+       "a typo in a shortcut writes nothing at all")
+    ok(not os.path.exists(path), "and leaves no file behind")
+    with open(path, "w") as fh:
+        fh.write("nonsense\n")
+    ok(grammar_core.take_card_action(path) is None, "a verb that is not ours is dropped, not acted on")
+    grammar_core.write_card_action("accept", path)
+    grammar_core.clear_card_action(path)
+    ok(grammar_core.take_card_action(path) is None,
+       "and a card clears a stale marker as it starts, so only its own presses count")
+    # The card answers through the very functions the gate just tested, and the mapping is the
+    # contract between the two: accept is the primary action the card already offers, dismiss is the
+    # empty answer every dismissal looks like.
+    ok(popup.take_card_action is grammar_core.take_card_action
+       and popup.clear_card_action is grammar_core.clear_card_action,
+       "the card's process uses the same reader the tests exercise")
+    ok(popup.KEYBOARD_ACTIONS == {"accept": ("sentence", ""), "dismiss": ("", "")},
+       "and the verbs map to what a click sends: %r" % (popup.KEYBOARD_ACTIONS,))
+
+
+def test_live_keyboard():
+    """A real card, the real command a shortcut runs, and the answer the watcher would act on.
+
+    Opt-in like the placement leg, and for the same reason: it puts a card on screen. XDG_CACHE_HOME
+    points at a temporary directory for both processes, so the marker written here is never the one a
+    real key press would use.
+    """
+    if not os.environ.get("GRAMMAR_LIVE"):
+        print("  live keyboard: skipped (GRAMMAR_LIVE=1 puts a real card on screen)")
+        return
+    if not os.environ.get("DISPLAY"):
+        print("  live keyboard: skipped (no DISPLAY)")
+        return
+    cache = tempfile.mkdtemp(prefix="grammar-action-live-")
+    env = dict(os.environ, XDG_CACHE_HOME=cache)
+    command = os.path.join(HERE, "grammar-action.py")
+    try:
+        for verb, want in (("accept", '{"action": "sentence"}'), ("dismiss", "")):
+            proc = subprocess.Popen(
+                [sys.executable, POPUP, "--x", "300", "--y", "300", "--old", "go", "--new", "goes",
+                 "--reason", "Subject-verb agreement", "--timeout", "20"],
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env)
+            try:
+                time.sleep(2.5)          # Qt up, the stale marker cleared, the poll running
+                run = subprocess.run([sys.executable, command, verb], env=env,
+                                     capture_output=True, text=True, timeout=10)
+                ok(run.returncode == 0, "grammar-action %s exits 0" % verb)
+                out, _ = proc.communicate(timeout=15)
+                ok(out.decode().strip() == want,
+                   "a %s press answers the card with exactly %r, got %r"
+                   % (verb, want, out.decode().strip()))
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait(timeout=5)
+        # A verb that is not ours: refused, and it leaves nothing for a card to pick up.
+        bad = subprocess.run([sys.executable, command, "wat"], env=env,
+                             capture_output=True, text=True, timeout=10)
+        ok(bad.returncode == 2, "an unknown verb is refused rather than guessed at: %r"
+           % bad.stderr.strip())
+        ok(not os.path.exists(os.path.join(cache, "grammar-server", "card-action")),
+           "and a refused verb leaves no marker")
+    finally:
+        shutil.rmtree(cache, ignore_errors=True)
+
+
 def main():
     try:
         popup = load_popup()
@@ -439,8 +522,10 @@ def main():
         test_clamp(popup)
         test_motion(popup)
         test_payload(popup)
+        test_keyboard(popup)
         test_settings(popup)
     test_live()
+    test_live_keyboard()
     # A gate that can pass having run nothing is not a gate. This one reported "0 assertions -
     # passed" in CI once, with a green tick, on a runner where the card's module could not even be
     # imported. If nothing ran, that is the finding.

@@ -47,8 +47,10 @@ It cannot paste for you: KWin does not implement the Wayland virtual-keyboard pr
 says so) and `ydotoold` is not running, so the last Ctrl+V is yours. It does paste automatically
 if either becomes available.
 
-**The shortcut takes effect at the next login** — kglobalaccel reads its config when it starts, so
-`make install` writes `Ctrl+Alt+C` but the running session keeps its old set.
+**The shortcut is yours to bind** — System Settings → Shortcuts → *Check my selection*, or the
+`kwriteconfig6` line under "Accept and dismiss from the keyboard" below, with the entry name
+`grammar-lookup.desktop`. This Makefile writes no keys. A binding takes effect at the next login,
+because kglobalaccel reads its config when it starts.
 
 ### Suggestions as you type
 
@@ -79,11 +81,42 @@ We should arrange a meeting to discuss the report.   ← click one to replace th
   returns through the UI thread, because Qt is not thread-safe either and a frozen card is worse than a
   card. The sentence sent is the **corrected** one: handing a small model your own errors invites
   it to preserve them.
-- The card **never takes focus**, so typing continues while it is up. That is also why Enter and
-  Escape do nothing — it receives no key events, by design. Clicking is the interaction.
+- The card **never takes focus**, so typing continues while it is up. That is also why it receives no
+  key events of its own: Enter and Escape arrive from the desktop's shortcut system instead, through
+  `grammar-action` (below). Clicking stays the interaction that needs no setup.
 - Dismissed, it says nothing; a finding is mentioned once, and there is a 5 s cooldown between
   offers. When no card can be placed — the application will not say where the caret is, or there
   is no display — a notification with the same actions appears instead.
+
+### Accept and dismiss from the keyboard
+
+The card cannot be given the keyboard, so the two keys you would expect on it are shortcuts instead —
+one command each, bound by you:
+
+```bash
+grammar-action accept     # the same as clicking "Fix sentence"
+grammar-action dismiss    # the same as "Ignore", or the ✕
+```
+
+Binding them (KDE): System Settings → **Shortcuts**, find *Accept the suggestion* and *Dismiss the
+suggestion* (the launcher entries this installs), and give each a key. Ctrl+Alt+Return and
+Ctrl+Alt+Escape are the suggestions, and nothing here claims either one. From a shell, the same thing:
+
+```bash
+kwriteconfig6 --file kglobalshortcutsrc --group services --group grammar-accept.desktop \
+              --key _launch 'Ctrl+Alt+Return'
+kwriteconfig6 --file kglobalshortcutsrc --group services --group grammar-dismiss.desktop \
+              --key _launch 'Ctrl+Alt+Escape'
+```
+
+A new binding takes effect at the next login, because kglobalaccel reads its config when it starts.
+
+How it works, since it is not obvious: the command leaves a marker in
+`~/.cache/grammar-server/card-action`, and the card's own process — the only one that can answer for
+it — picks the marker up and exits exactly as a click would. A card discards any stale marker as it
+starts and consumes the one it acts on, so a press can never be applied twice or land on a card that
+was not on screen when you made it. With no card up, the command does nothing at all, and a typo in a
+shortcut says so in the journal rather than doing something arbitrary.
 
 ## Install (Linux, current user)
 
@@ -101,8 +134,8 @@ Three gates, all of them the scripts' own assertions — `make test` is the same
 
 ```bash
 python3 desktop/test-lookup.py        # fix logic, dialog contract, live engine
-python3 desktop/test-watch.py         # sentence window, answer routing, listeners
-python3 desktop/test-popup-place.py   # payload, clamp(), and where the card lands
+python3 desktop/test-watch.py         # sentence window, answer routing, listeners, the pause list
+python3 desktop/test-popup-place.py   # payload, clamp() and the flip, the keyboard marker, where the card lands
 ```
 
 **The live legs are opt-in**, through `GRAMMAR_LIVE=1`:
@@ -134,9 +167,13 @@ curl -s -X POST localhost:8875/v1/ai -H 'Content-Type: application/json' \
 ```
 
 `ollama`, `llamacpp`, `lmstudio`, `vllm`, `openrouter`, `openai` (any server speaking
-`/v1/chat/completions`), or off. The model list comes from the backend's own `GET /v1/models`; an
-API key is read from the environment variable the preset names and is never stored here. Settings
-are accepted only from the machine the server runs on, so a phone on the LAN can check text but
-cannot change the backend.
+`/v1/chat/completions`), or off. The model list comes from the backend's own `GET /v1/models`.
+
+A key, for the backends that want one, comes from the environment variable the preset names — or from
+your desktop keyring, if you typed one into the settings panel, in which case the engine keeps it
+there through `secret-tool` and removes the plaintext file it used to write. A machine with no
+keyring (no secret-tool, no session bus, a locked wallet) falls back to that file, 0600. Either way
+the value is never returned over HTTP and never stored in this repo. Settings are accepted only from
+the machine the server runs on, so a phone on the LAN can check text but cannot change the backend.
 
 MIT licensed (see `LICENSE`).

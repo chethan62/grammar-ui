@@ -70,10 +70,10 @@ import urllib.request
 # its directory on the path, so a plain `import grammar_core` would fail there while working when
 # the script is run directly.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from grammar_core import (CARET_GAP, MAX_CANDIDATES, MAX_CHIPS, REPHRASE_TIMEOUT, TONES, INTENTS,
-                         DEFAULT_API, action_json, api_error_message, candidates_from, card_colors,
-                         clamp, get_json, parse_payload, post_json, rephrase_body,
-                         settings_view)
+from grammar_core import (CARET_GAP, KEYBOARD_ACTIONS, MAX_CANDIDATES, MAX_CHIPS, REPHRASE_TIMEOUT,
+                         TONES, INTENTS, DEFAULT_API, action_json, api_error_message,
+                         candidates_from, card_colors, clamp, clear_card_action, get_json,
+                         parse_payload, post_json, rephrase_body, settings_view, take_card_action)
 
 
 
@@ -327,6 +327,21 @@ def main():
 
     bridge = Bridge(window, payload, app, api_base)
     engine.rootContext().setContextProperty("bridge", bridge)
+    if not settings_mode:
+        # The keyboard route: a shortcut leaves a marker, and this process — the only one that can
+        # answer for this card — turns it into the same action a click would. Cleared first, so only
+        # presses made while this card is on screen can count, and consumed on use, so one press can
+        # never be applied twice.
+        clear_card_action()
+        keyboard = QTimer()
+        keyboard.setInterval(150)
+
+        def take_action():
+            verb = take_card_action()
+            if verb:
+                bridge.choose(*KEYBOARD_ACTIONS[verb])
+        keyboard.timeout.connect(take_action)
+        keyboard.start()
     if settings_mode:
         bridge.loadSettings()          # the panel asks for its own state; nothing is passed in
 

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Accept the suggestion
+GenericName=Apply the fix the card offers
+Comment=Apply the correction the suggestion card is showing, from the keyboard (bind it in Shortcuts)
+Exec=@BINDIR@/grammar-action accept
+Icon=grammar-ui
+Terminal=false
+Categories=Utility;TextTools;
+Keywords=grammar;accept;apply;fix;card;
+StartupNotify=false

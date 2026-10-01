@@ -117,7 +117,7 @@ def check_install(bindir=None):
     """
     bindir = bindir or BINDIR
     wanted = ("grammar-lookup", "grammar-watch", "grammar-popup.py", "grammar-doctor",
-              "grammar_core.py", "grammar-card.qml")
+              "grammar-action", "grammar_core.py", "grammar-card.qml")
     missing = [name for name in wanted if not os.path.exists(os.path.join(bindir, name))]
     if missing:
         return (True, False, "missing from %s: %s" % (bindir, ", ".join(missing)),

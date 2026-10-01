@@ -266,6 +266,65 @@ def add_blocked(text, app):
     return (text or "").rstrip("\n") + ("\n" if text else "") + name + "\n"
 
 
+# ---- the keyboard route to a card's answer -------------------------------------------------------
+# The card can never take the keyboard — that is the whole point of it, the caret has to stay in the
+# text you are typing into — so Enter and Escape have to arrive from outside. A shortcut runs a tiny
+# command that leaves a marker, and the card's own process, the only one that can answer for it, picks
+# the marker up and exits exactly as a click would. Two shortcuts, one word each.
+CARD_ACTION_PATH = os.path.join(
+    os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"),
+    "grammar-server", "card-action")
+
+# What the shortcut says, and the answer the card gives it. "sentence" is the primary action the card
+# already offers ("Fix sentence"), and "" is how every dismissal looks: no action, nothing printed.
+KEYBOARD_ACTIONS = {"accept": ("sentence", ""), "dismiss": ("", "")}
+
+
+def write_card_action(verb, path=None):
+    """Leave the marker a card will pick up.
+
+    False for anything that is not one of ours: a typo in a shortcut must do nothing at all, rather
+    than something surprising.
+    """
+    if verb not in KEYBOARD_ACTIONS:
+        return False
+    path = path or CARD_ACTION_PATH
+    if os.path.dirname(path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as fh:
+        fh.write(verb + "\n")
+    return True
+
+
+def take_card_action(path=None):
+    """The verb a card should act on — consumed as it is read.
+
+    Read-and-remove in one place is what makes the marker safe: a card clears any stale one before it
+    starts, and picking one up deletes it, so a press can never be applied twice or land on the next
+    card. An unknown verb is dropped, not acted on.
+    """
+    path = path or CARD_ACTION_PATH
+    try:
+        with open(path) as fh:
+            verb = fh.read().strip()
+    except OSError:
+        return None
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+    return verb if verb in KEYBOARD_ACTIONS else None
+
+
+def clear_card_action(path=None):
+    """Throw away whatever is sitting there: a card calls this as it starts, so only presses made
+    while it is on screen can ever reach it."""
+    try:
+        os.remove(path or CARD_ACTION_PATH)
+    except OSError:
+        pass
+
+
 # The space left between the caret's line and the card. Both ends need it: the watcher places the
 # request at the caret's bottom edge plus this, and clamp() undoes it to find the caret's top when it
 # has to hang the card above instead.
