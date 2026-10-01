@@ -991,6 +991,93 @@ def test_live_a_pressed_button_says_the_same_thing_as_the_key():
         shutil.rmtree(cache, ignore_errors=True)
 
 
+def test_live_the_panel_fits_a_small_screen():
+    """The panel must fit the screen it is on, however many words are ignored.
+
+    Its fixed content measures ~709 px with nothing in its lists, so a screen shorter than that is the
+    case where the two capped lists had nothing left to give up and clamp() could only push the footer —
+    with Save on it — off an edge. That is what the panel-level scroll is for.
+
+    A screen small enough is made honestly: `QT_SCALE_FACTOR=2` on the *real* display, which reports a
+    540-tall availableGeometry() through the same call the panel measures. The offscreen platform is the
+    other way to fake one and it segfaults in QtQuick's software renderer the moment a list has a
+    scrollbar to draw, which is how a previous version of this leg failed for the wrong reason.
+
+    The assertion is the one the PLACED line exists to allow, and it has been seen failing: with the
+    panel scroll stashed, 30 words on this screen placed 436x773 at y=-233; with it, 436x488 at y=26.
+    """
+    if not os.environ.get("GRAMMAR_LIVE"):
+        print("  live small screen: skipped (GRAMMAR_LIVE=1 puts a real panel on screen)")
+        return
+    if not os.environ.get("DISPLAY"):
+        print("  live small screen: skipped (no DISPLAY to scale)")
+        return
+    api = os.environ.get("GRAMMAR_API") or "http://127.0.0.1:8875"
+    words = ["zztmp%d" % n for n in range(1, 31)]        # thirty: past any list cap, and past panelMax
+
+    def ask(word, forget_word=False):
+        body = json.dumps({"word": word, "forget": forget_word}).encode()
+        req = urllib.request.Request(api + "/v2/ignore", data=body,
+                                     headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status
+        except Exception:
+            return 0
+
+    if ask(words[0]) != 200:
+        print("  live small screen: skipped (no engine at %s)" % api)
+        return
+
+    cache = tempfile.mkdtemp(prefix="grammar-small-screen-")
+    errfile = os.path.join(cache, "stderr")
+    env = dict(os.environ, XDG_CONFIG_HOME=cache, XDG_CACHE_HOME=cache,
+               QT_QPA_PLATFORM="xcb", QT_SCALE_FACTOR="2")
+    proc = None
+    try:
+        for word in words:
+            ask(word)
+        # What that screen is, asked the way the panel asks it.
+        probe = subprocess.run([sys.executable, "-c",
+                                "from PySide6.QtGui import QGuiApplication\n"
+                                "app = QGuiApplication([])\n"
+                                "a = app.primaryScreen().availableGeometry()\n"
+                                "print(a.width(), a.height())"],
+                               capture_output=True, text=True, env=env)
+        try:
+            screen_w, screen_h = (int(v) for v in probe.stdout.split()[:2])
+        except Exception:
+            print("  live small screen: skipped (no scaled screen: %r)" % probe.stdout.strip())
+            return
+        with open(errfile, "w") as err:
+            proc = subprocess.Popen([sys.executable, POPUP, "--settings"],
+                                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=err,
+                                    env=env)
+            placed, deadline = None, time.time() + 25
+            while placed is None and time.time() < deadline:
+                time.sleep(0.5)
+                found = re.search(r"PLACED (\d+) (\d+) \(asked (\S+)\) size (\d+)x(\d+)",
+                                  open(errfile).read())
+                placed = found.groups() if found else None
+        ok(placed is not None,
+           "the panel said the size it gave itself on a %dx%d screen" % (screen_w, screen_h))
+        if placed is None:
+            return
+        got_x, got_y, got_w, got_h = (int(v) for v in placed[:2] + placed[3:5])
+        ok(got_h <= screen_h,
+           "and it fits that screen: %dx%d at %d,%d inside %dx%d"
+           % (got_w, got_h, got_x, got_y, screen_w, screen_h))
+        ok(got_w <= screen_w, "and across it too: %d against %d" % (got_w, screen_w))
+        ok(got_y >= 0, "and it was not pushed off the top: y=%d" % got_y)
+    finally:
+        if proc is not None and proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=5)
+        for word in words:
+            ask(word, True)
+        shutil.rmtree(cache, ignore_errors=True)
+
+
 def test_live_the_panel_lists_and_removes():
     """The settings window's own buttons — and the list case its row cap used to hide.
 
@@ -1196,6 +1283,7 @@ def main():
     test_live_keyboard()
     test_live_a_pressed_button_says_the_same_thing_as_the_key()
     test_live_the_panel_lists_and_removes()
+    test_live_the_panel_fits_a_small_screen()
     # A gate that can pass having run nothing is not a gate. This one reported "0 assertions -
     # passed" in CI once, with a green tick, on a runner where the card's module could not even be
     # imported. If nothing ran, that is the finding.
