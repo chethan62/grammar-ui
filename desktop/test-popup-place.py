@@ -18,6 +18,7 @@ display and are the part CI can run; the live leg skips itself where there is no
 """
 
 import importlib.util
+import json
 import os
 import re
 import shutil
@@ -26,6 +27,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.request
 
 # The same guard test-watch.py carries, for the same reason: `make test` calls `python3`,
 # which is not necessarily the interpreter that has PySide6. Without this the gate spawned the
@@ -679,19 +681,15 @@ def test_settings_holds_everything(popup):
     Each comes from a different owner — the engine's ignore list, this client's blocklist, a pause
     timestamp — and two of them had no surface at all before: a word could be added from a card and only
     a text editor could take it back, and "Ignore in <application>" had the same problem. What this pins
-    is that the view carries them, sorted and capped, and that it says where the rest are instead of
-    quietly dropping what did not fit.
+    is that the view carries them, sorted, and with nothing dropped: the cap that used to hide the
+    seventh row is gone, because the panel scrolls now.
     """
-    view = popup.settings_view({"provider": "ollama", "url": "u", "model": "m",
-                                "words": ["Zorbulating", "kanban", "tea", "Tech", "zebra", "alpha",
-                                          "beta", "gamma"],
-                                "wordsPath": "/tmp/ignored-words",
+    eight = ["Zorbulating", "kanban", "tea", "Tech", "zebra", "alpha", "beta", "gamma"]
+    view = popup.settings_view({"provider": "ollama", "url": "u", "model": "m", "words": eight,
                                 "pausedApps": ["Kate", "Firefox"], "pauseUntil": 0})
-    ok(len(view["words"]) == popup.MAX_SETTING_ROWS, "the list is capped: %d" % len(view["words"]))
-    ok(view["wordsMore"] == 2, "and the rest are counted, not dropped: %r" % view["wordsMore"])
-    ok(view["wordsPath"] == "/tmp/ignored-words",
-       "with the file that holds them, because that is where the rest are")
-    ok(view["words"] == ["alpha", "beta", "gamma", "kanban", "tea", "Tech"],
+    ok(len(view["words"]) == len(eight),
+       "every word is the panel's to draw, not just the first six: %d" % len(view["words"]))
+    ok(view["words"] == ["alpha", "beta", "gamma", "kanban", "tea", "Tech", "zebra", "Zorbulating"],
        "sorted the way a person reads a list: %r" % view["words"])
     ok(view["pausedApps"] == ["Firefox", "Kate"], "the paused applications: %r" % view["pausedApps"])
     ok(view["pauseNote"] == "not paused", "an expired pause reads as none: %r" % view["pauseNote"])
@@ -703,11 +701,16 @@ def test_settings_holds_everything(popup):
        "and a panel with none of it still has the keys the QML reads")
 
     # The other half of the seam, the one that would go unnoticed: a key renamed on the view side is a
-    # blank row on the panel, and nothing else in the gates would say a word about it.
+    # blank row on the panel, and nothing else in the gates would say a word about it. The reversed
+    # check matters just as much — a key the QML still reads after the view stopped sending it is a
+    # note that renders as the word "undefined".
     qml = open(os.path.join(HERE, "grammar-card.qml")).read()
-    for key in ("words", "wordsMore", "wordsPath", "pausedApps", "pauseNote"):
+    for key in ("words", "pausedApps", "pauseNote"):
         ok(('"%s"' % key) in qml,
            "the panel draws %r, so renaming either side cannot pass silently" % key)
+    for gone in ("wordsMore", "wordsPath"):
+        ok(('"%s"' % gone) not in qml,
+           "and nothing still reads %r, which the view no longer sends" % gone)
 
 
 def test_live():
@@ -978,6 +981,129 @@ def test_live_a_pressed_button_says_the_same_thing_as_the_key():
         shutil.rmtree(cache, ignore_errors=True)
 
 
+def test_live_the_panel_lists_and_removes():
+    """The settings window's own buttons — and the list case its row cap used to hide.
+
+    The card's buttons got a leg earlier; the panel's had none, so "Allow <word>" could stop working
+    and every gate would stay green. It also carries the case the six-row cap hid: a word that did not
+    fit was not in the tree at all, and the panel is the only place it can be undone.
+
+    The engine owns the ignore list, so the words go in over its own API and come out again through a
+    press on the panel — net zero, on spellings nobody would type. XDG_CONFIG_HOME and XDG_CACHE_HOME
+    point at a throwaway directory: that moves the blocklist and the pause this panel touches, so the
+    real ones are not in this test's hands. The engine has no such switch (it is a service with its own
+    environment), which is exactly why the words are cleaned up in a finally.
+    """
+    if not os.environ.get("GRAMMAR_LIVE"):
+        print("  live panel: skipped (GRAMMAR_LIVE=1 puts a real window on screen)")
+        return
+    if not os.environ.get("DISPLAY"):
+        print("  live panel: skipped (no DISPLAY)")
+        return
+    try:
+        import gi
+        gi.require_version("Atspi", "2.0")
+        from gi.repository import Atspi
+    except (ValueError, ImportError):
+        print("  live panel: skipped (no at-spi typelib here)")
+        return
+
+    api = os.environ.get("GRAMMAR_API") or "http://127.0.0.1:8875"
+    words = ["zztmp%d" % n for n in range(1, 9)]        # eight: more than the cap this test is about
+    cache = tempfile.mkdtemp(prefix="grammar-panel-live-")
+    env = dict(os.environ, XDG_CONFIG_HOME=cache, XDG_CACHE_HOME=cache)
+
+    def ask(word, forget_word=False):
+        """(status, body) from the engine's ignore route. Its list is the owner's, not this test's, so
+        it is changed over its own API rather than by writing a file behind it."""
+        body = json.dumps({"word": word, "forget": forget_word}).encode()
+        req = urllib.request.Request(api + "/v2/ignore", data=body,
+                                     headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status, json.loads(r.read().decode() or "{}")
+        except Exception as exc:
+            return 0, {"error": str(exc)}
+
+    def listed_now():
+        try:
+            with urllib.request.urlopen(api + "/v2/ignore", timeout=5) as r:
+                return json.loads(r.read().decode() or "{}").get("words") or []
+        except Exception:
+            return []
+
+    def forget(word):
+        ask(word, forget_word=True)
+
+    def node_named(node, name, depth=0):
+        if node is None or depth > 14:
+            return None
+        try:
+            if node.get_name() == name:
+                iface = node.get_action_iface()
+                if iface is not None and iface.get_n_actions() > 0:
+                    return node
+        except Exception:
+            pass
+        try:
+            for i in range(min(node.get_child_count(), 200)):
+                found = node_named(node.get_child_at_index(i), name, depth + 1)
+                if found is not None:
+                    return found
+        except Exception:
+            pass
+        return None
+
+    def app_for(pid):
+        desktop = Atspi.get_desktop(0)
+        for i in range(desktop.get_child_count()):
+            app = desktop.get_child_at_index(i)
+            if app is not None and app.get_process_id() == pid:
+                return app
+        return None
+
+    proc = None
+    try:
+        code, answer = ask(words[0])
+        if code != 200:
+            print("  live panel: skipped (no engine at %s: %s)" % (api, answer))
+            return
+        forget(words[0])
+        for word in words:
+            ask(word)
+
+        proc = subprocess.Popen([sys.executable, POPUP, "--settings"],
+                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL, env=env)
+        last = "Allow " + words[-1]
+        button, deadline = None, time.time() + 15
+        while button is None and time.time() < deadline:
+            button = node_named(app_for(proc.pid), last)
+            if button is None:
+                time.sleep(0.3)
+        ok(button is not None,
+           "the panel lists all %d words, including the last one (%r)" % (len(words), last))
+        if button is None:
+            return
+        iface = button.get_action_iface()
+        names = [iface.get_action_name(i) for i in range(iface.get_n_actions())]
+        iface.do_action(names.index("Press") if "Press" in names else 0)
+        time.sleep(2.5)
+        listed = listed_now()
+        ok(words[-1] not in listed,
+           "pressing it took the word off the engine's list: %r" % (listed,))
+        ok(len(listed) == len(words) - 1,
+           "and only that one, out of the %d: %r" % (len(words), listed))
+    finally:
+        if proc is not None:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=5)
+        for word in words:
+            forget(word)
+        shutil.rmtree(cache, ignore_errors=True)
+
+
 def main():
     try:
         popup = load_popup()
@@ -1008,6 +1134,7 @@ def main():
     test_live()
     test_live_keyboard()
     test_live_a_pressed_button_says_the_same_thing_as_the_key()
+    test_live_the_panel_lists_and_removes()
     # A gate that can pass having run nothing is not a gate. This one reported "0 assertions -
     # passed" in CI once, with a green tick, on a runner where the card's module could not even be
     # imported. If nothing ran, that is the finding.

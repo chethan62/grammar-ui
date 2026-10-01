@@ -451,39 +451,48 @@ Window {
 
             Field {
                 label: "IGNORED WORDS"
-                note: {
-                    if (!card.s("words", []).length)
-                        return "Nothing ignored yet. \"Ignore this word\" on a card adds one."
-                    var more = card.s("wordsMore", 0)
-                    return (more > 0 ? (more + " more in " + card.s("wordsPath", "") + ". ") : "")
-                           + "The engine stops reporting these; removing one brings the findings back."
-                }
-                Repeater {
-                    model: card.s("words", [])
-                    delegate: RowLayout {
+                note: card.s("words", []).length
+                      ? "The engine stops reporting these; removing one brings the findings back."
+                      : "Nothing ignored yet. \"Ignore this word\" on a card adds one."
+                // Bounded, so the window stays a window: the list scrolls inside it instead of
+                // growing the panel. Eight ignored words used to make it 785 px tall, and the cap
+                // that hid the rest was a worse answer than a scrollbar — this panel is where the
+                // user is told to look for them.
+                ScrollView {
+                    width: parent.width
+                    implicitHeight: Math.min(contentItem.implicitHeight, 132)
+                    clip: true
+                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                    Column {
                         width: parent.width
-                        spacing: 6
-                        Text {
-                            // Layout.fillWidth, not an arithmetic width: a long ignored word has to
-                            // shorten itself rather than push its own button off the panel. Measured
-                            // on the first attempt — "Allow flibbertigibbet" came out clipped.
-                            Layout.fillWidth: true
-                            text: modelData
-                            font.pixelSize: 12
-                            color: card.c("muted", "#5a6472")
-                            elide: Text.ElideRight
-                        }
-                        Act {
-                            flat: true
-                            // The name is the action and the word. A column of buttons all called
-                            // "Remove" is a list no one — screen reader or gate — can tell apart.
-                            text: "Allow " + modelData
-                            Accessible.description: "Stop ignoring " + modelData
-                            onClicked: bridge.dropWord(modelData)
+                        spacing: 4
+                            Repeater {
+                        model: card.s("words", [])
+                        delegate: RowLayout {
+                            width: parent.width
+                            spacing: 6
+                            Text {
+                                // Layout.fillWidth, not an arithmetic width: a long ignored word has to
+                                // shorten itself rather than push its own button off the panel. Measured
+                                // on the first attempt — "Allow flibbertigibbet" came out clipped.
+                                Layout.fillWidth: true
+                                text: modelData
+                                font.pixelSize: 12
+                                color: card.c("muted", "#5a6472")
+                                elide: Text.ElideRight
+                            }
+                            Act {
+                                flat: true
+                                // The name is the action and the word. A column of buttons all called
+                                // "Remove" is a list no one — screen reader or gate — can tell apart.
+                                text: "Allow " + modelData
+                                Accessible.description: "Stop ignoring " + modelData
+                                onClicked: bridge.dropWord(modelData)
+                            }
                         }
                     }
-                }
-            }
+                    }
+                }            }
 
             Rule {}
 
@@ -493,27 +502,40 @@ Window {
                       ? "Checked nowhere until you resume them. Password managers and terminals are "
                         + "always left alone and are not listed."
                       : "Nothing paused. \"Ignore in <application>\" on a card pauses one."
-                Repeater {
-                    model: card.s("pausedApps", [])
-                    delegate: RowLayout {
+                // Bounded, so the window stays a window: the list scrolls inside it instead of
+                // growing the panel. Eight ignored words used to make it 785 px tall, and the cap
+                // that hid the rest was a worse answer than a scrollbar — this panel is where the
+                // user is told to look for them.
+                ScrollView {
+                    width: parent.width
+                    implicitHeight: Math.min(contentItem.implicitHeight, 132)
+                    clip: true
+                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                    Column {
                         width: parent.width
-                        spacing: 6
-                        Text {
-                            Layout.fillWidth: true
-                            text: modelData
-                            font.pixelSize: 12
-                            color: card.c("muted", "#5a6472")
-                            elide: Text.ElideRight
-                        }
-                        Act {
-                            flat: true
-                            text: "Resume " + modelData
-                            Accessible.description: "Check in " + modelData + " again"
-                            onClicked: bridge.resumeApp(modelData)
+                        spacing: 4
+                            Repeater {
+                        model: card.s("pausedApps", [])
+                        delegate: RowLayout {
+                            width: parent.width
+                            spacing: 6
+                            Text {
+                                Layout.fillWidth: true
+                                text: modelData
+                                font.pixelSize: 12
+                                color: card.c("muted", "#5a6472")
+                                elide: Text.ElideRight
+                            }
+                            Act {
+                                flat: true
+                                text: "Resume " + modelData
+                                Accessible.description: "Check in " + modelData + " again"
+                                onClicked: bridge.resumeApp(modelData)
+                            }
                         }
                     }
-                }
-            }
+                    }
+                }            }
 
             Rule {}
 

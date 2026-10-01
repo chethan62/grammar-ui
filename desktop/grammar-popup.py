@@ -72,7 +72,7 @@ import urllib.request
 # its directory on the path, so a plain `import grammar_core` would fail there while working when
 # the script is run directly.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from grammar_core import (CARET_GAP, KEYBOARD_ACTIONS, MAX_CANDIDATES, MAX_CHIPS, MAX_SETTING_ROWS,
+from grammar_core import (CARET_GAP, KEYBOARD_ACTIONS, MAX_CANDIDATES, MAX_CHIPS,
                          REPHRASE_TIMEOUT,
                          TONES, INTENTS, DEFAULT_API, action_json, ai_note, api_error_message,
                          blocked_apps, candidates_from, card_colors, change_summary, clamp,
@@ -412,17 +412,17 @@ class Bridge(QObject):
             # The settings that are not the AI runner's, gathered into one state so the panel draws
             # once. Read rather than cached: a card's "Ignore this word" button, or the pause CLI run
             # from a shortcut, can change them while this panel is open.
-            extra = {"words": [], "wordsPath": ""}
             words_status = ""      # a successful load has nothing to report — including that it worked
             words_code, words_answer = get_json(self.api_base + "/v2/ignore")
+            words_list = []
             if words_code == 200 and isinstance(words_answer, dict):
-                extra = {"words": words_answer.get("words") or [],
-                         "wordsPath": words_answer.get("path") or ""}
+                words_list = words_answer.get("words") or []
             else:
                 # An engine that cannot list them is not a panel that shows nothing: it says so, the
                 # way every other engine failure in this file is said.
                 words_status = api_error_message(words_answer, words_code)
-            extra.update(pausedApps=blocked_apps(read_blocked()), pauseUntil=paused_until())
+            extra = {"words": words_list, "pausedApps": blocked_apps(read_blocked()),
+                     "pauseUntil": paused_until()}
             self.window.setProperty("settings", settings_view(dict(state, **extra)))
             # Written once, last: "Asking the engine…" is stale the moment this succeeds, and the words
             # failure above must not be wiped by a later clear.
