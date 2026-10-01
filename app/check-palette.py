@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""The window's palette must be grammar_core.card_colors().
+"""What the window copies from grammar_core must still match it.
+
+The app is CSS and JS in a webview and cannot import Python, so it copies two things: the palette and the
+debounce bands. A copy nothing checks is a copy that drifts, which is what this file is for.
 
 The app cannot import the Python module — it is CSS in a webview — so the tokens are copied, and a copy
 that nothing checks is a copy that drifts. This is that check, and it is a script rather than a recipe in
@@ -46,6 +49,16 @@ for shade in (False, True):
         got = ratio(tokens[fg], tokens[bg])
         if got < 4.5:
             drift.append("%s %s on %s is %.2f, under 4.5" % ("dark" if shade else "light", fg, bg, got))
+
+# The debounce bands in src/main.js are a port of grammar_core.debounce_ms: same four answers, or the
+# window waits a different length of time than the product it is part of does.
+py_bands = {i: core.debounce_ms(i) for i in (None, 0, 39, 40, 249, 250, 10000)}
+mjs = (HERE / "src/main.js").read_text()
+js_start = mjs.index("function debounceMs(")
+js_body = mjs[js_start:mjs.index("\n}\n", js_start)]
+for probe, want in py_bands.items():
+    if ("return %d;" % want) not in js_body:
+        drift.append("debounce_ms(%s)=%s is missing from src/main.js" % (probe, want))
 
 if drift:
     print("  app: PALETTE DRIFTED from grammar_core.card_colors(): " + ", ".join(drift))

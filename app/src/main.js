@@ -44,10 +44,15 @@ function findingsFrom(body, text) {
     const offset = Number(match.offset) || 0;
     const length = Number(match.length) || 0;
     const replacements = match.replacements || [];
+    // A replacement is an object with a `value` — LanguageTool's shape, and what the engine sends. Reading
+    // it as a string produced "Use [object Object]" on every Apply button, which no unit test caught because
+    // the fixture had been written from the assumption rather than from a real response.
+    const first = replacements[0];
+    const after = first == null ? null : (typeof first === "string" ? first : (first.value ?? null));
     return {
       message: match.message || "Finding",
       before: text.slice(offset, offset + length),
-      after: replacements.length ? replacements[0] : null,
+      after,
       offset,
       length,
     };
@@ -75,6 +80,11 @@ function findingRow(finding) {
     await check();
   });
 
+  const fix = document.createElement("button");
+  fix.className = "flat";
+  fix.textContent = "Fix sentence";
+  fix.addEventListener("click", () => fixSentence(finding));
+
   const ignore = document.createElement("button");
   ignore.className = "flat";
   ignore.textContent = "Ignore this word";
@@ -94,7 +104,7 @@ function findingRow(finding) {
     }
   });
 
-  div.append(label, apply, ignore);
+  div.append(label, apply, fix, ignore);
   return div;
 }
 
@@ -104,30 +114,126 @@ function saveDraft() {
   try { localStorage.setItem("grammar-draft", $("draft").value); } catch { /* nothing to say */ }
 }
 
+// Bands, not a formula: a formula needs its reasoning carried around, and a band is one sentence. A slow
+// engine is given a LONGER wait, not a shorter one — the way to make a slow engine feel worse is to hand it
+// more requests. These are grammar_core.debounce_ms, measured for this engine (0-1 ms warm, 49 ms on the
+// first call): a debounce a thousand times the thing it waits for is not patience, it is the whole latency.
+// `null` means nothing has been measured yet, which is not the same as fast.
+function debounceMs(lastMs) {
+  if (lastMs === null) return 600;
+  if (lastMs < 40) return 300;
+  if (lastMs < 250) return 900;
+  return 1500;
+}
+
+const state = { findings: [], lastMs: null, timer: null, seq: 0 };
+
+function drawFindings(text) {
+  $("findings").replaceChildren(...state.findings.map((f) => findingRow(f, text)));
+}
+
+function showFindings(body, text) {
+  state.findings = findingsFrom(body, text);
+  const partial = !!(body.warnings && body.warnings.incompleteResults);
+  const n = state.findings.length;
+  $("found").textContent = n
+    ? n + (n === 1 ? " finding" : " findings") + (partial ? " (partial)" : "")
+    : "Nothing flagged" + (partial ? " — but the check was partial" : "");
+  return n;
+}
+
+async function liveCheck() {
+  const text = $("draft").value;
+  clearTimeout(state.timer);
+  if (!text.trim()) { state.findings = []; drawFindings(text); $("found").textContent = ""; return; }
+  state.timer = setTimeout(async () => {
+    const mine = ++state.seq;
+    const began = performance.now();
+    try {
+      // Correctness only while typing: the style tier is what an explicit Check asks for, and the engine's
+      // README makes the same distinction for editor clients ("never shown hints it did not ask for").
+      const body = await call("/v2/check", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(askFor(text, false)),
+      });
+      // ponytail: the superseded request still runs. The engine answers in ~1 ms, so dropping its answer is
+      // enough — reach for AbortController if a check ever gets expensive.
+      if (mine !== state.seq) return;
+      state.lastMs = performance.now() - began;
+      showFindings(body, text);
+      drawFindings(text);
+    } catch (error) {
+      // typing stays quiet: the footer already reports an engine that is not answering
+    }
+  }, debounceMs(state.lastMs));
+}
+
+function askFor(text, full) {
+  const payload = { text };
+  if (full) payload.level = "picky";                                  // the explicit ask gets the style tier
+  if ($("language").value) payload.language = $("language").value;    // absent = the engine's own dialect
+  return payload;
+}
+
 async function check() {
   const text = $("draft").value;
-  $("findings").replaceChildren();
-  $("found").textContent = "";
-  if (!text.trim()) { $("found").textContent = "Nothing to check yet."; return; }
+  clearTimeout(state.timer);                                         // a deliberate check outranks a pending one
+  $("summary").textContent = "";
+  if (!text.trim()) {
+    state.findings = [];
+    drawFindings(text);
+    $("found").textContent = "";
+    $("announce").textContent = "Nothing to check yet.";
+    return;
+  }
   $("check").disabled = true;
+  state.seq++;                                                       // any in-flight live answer is stale now
   try {
-    const payload = { text, level: "picky" };
-    if ($("language").value) payload.language = $("language").value;   // absent = the engine's own dialect
     const body = await call("/v2/check", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(askFor(text, true)),
     });
-    const findings = findingsFrom(body, text);
-    $("findings").replaceChildren(...findings.map(findingRow));
-    const partial = !!(body.warnings && body.warnings.incompleteResults);
-    $("found").textContent = findings.length
-      ? findings.length + (findings.length === 1 ? " finding" : " findings") + (partial ? " (partial)" : "")
-      : "Nothing flagged" + (partial ? " — but the check was partial" : "");
+    const n = showFindings(body, text);
+    drawFindings(text);
+    $("announce").textContent = n
+      ? n + (n === 1 ? " finding" : " findings") + ". " + $("found").textContent
+      : "Nothing flagged.";
+    // How the text reads, from the engine's own counters — one more call, only on a deliberate check.
+    const stats = await call("/v2/stats", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    $("summary").textContent = stats.words
+      ? stats.words + " words · " + stats.sentences + (stats.sentences === 1 ? " sentence" : " sentences") +
+        " · reading ease " + stats.fleschReadingEase + " (" + stats.grade + ") · " + stats.readingTime
+      : "";
   } catch (error) {
     $("found").textContent = error.name === "TimeoutError"
       ? "The engine did not answer within 6 s." : "Could not check: " + error.message;
+    $("announce").textContent = $("found").textContent;
   } finally {
     $("check").disabled = false;
+  }
+}
+
+// The whole sentence a finding sits in, fixed in one call — the endpoint that picks harper's first
+// suggestion per finding, and returns the range so the client replaces exactly what the server fixed.
+async function fixSentence(finding) {
+  const area = $("draft");
+  const text = area.value;
+  try {
+    const body = await call("/v2/fix-sentence", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, offset: finding.offset }),
+    });
+    if (typeof body.fixed !== "string") return;
+    area.focus();
+    area.setRangeText(body.fixed, body.offset, body.offset + body.length, "select");
+    saveDraft();
+    await check();
+    $("announce").textContent = "Sentence fixed.";
+  } catch (error) {
+    $("announce").textContent = "Could not fix the sentence: " + error.message;
   }
 }
 
@@ -316,7 +422,7 @@ $("add").addEventListener("click", addWord);
 $("newWord").addEventListener("keydown", (event) => { if (event.key === "Enter") addWord(); });
 
 $("check").addEventListener("click", check);
-$("draft").addEventListener("input", saveDraft);
+$("draft").addEventListener("input", () => { saveDraft(); liveCheck(); });
 // Ctrl+Enter checks, matching the add field that submits on Enter — and it must not swallow plain Enter,
 // which inserts a newline in a textarea.
 $("draft").addEventListener("keydown", (event) => {
@@ -351,4 +457,5 @@ window.addEventListener("focus", load);
 
 $("draft").value = localStorage.getItem("grammar-draft") || "";
 showTab("check");
+if ($("draft").value) liveCheck();
 load();

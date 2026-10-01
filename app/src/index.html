@@ -23,8 +23,13 @@
     <textarea id="draft" rows="5" spellcheck="false" placeholder="Paste or type the text to check"></textarea>
     <div class="add">
       <button class="primary" id="check">Check</button>
-      <span class="status" id="found" role="status" aria-live="polite"></span>
+      <!-- #found is updated on every debounced keystroke, so it must not be a live region: a screen reader
+           would narrate "3 findings" over and over while someone types. The announcement goes to #announce,
+           which only the explicit Check writes. -->
+      <span class="status" id="found"></span>
+      <span class="sr-only" role="status" aria-live="polite" id="announce"></span>
     </div>
+    <p class="note" id="summary"></p>
     <div id="findings"></div>
   </section>
 
