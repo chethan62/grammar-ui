@@ -17,6 +17,8 @@ the checking happens now, and the page was a second surface to keep in step.
 | `grammar-popup.py` | the card itself — its own process, so a card that dies cannot take the watcher with it |
 | `grammar-popup.py --settings` | the AI-runner panel: which model rephrases (also in the menu as "Choose the AI runner") |
 | `grammar-doctor` | is the whole chain working? Every silent failure this product has, named with its fix |
+| `grammar-action` | `accept` / `dismiss` — what the keyboard shortcuts run |
+| `grammar-pause` | `15m` / `1h` / `off` — silence the checker for a while, or bring it back |
 
 None of them needs a browser extension, and none of them reads a DOM: they read the accessibility
 bus, the same interface a screen reader uses. That is also the limit — an application that
@@ -87,6 +89,11 @@ We should arrange a meeting to discuss the report.   ← click one to replace th
 - Dismissed, it says nothing; a finding is mentioned once, and there is a 5 s cooldown between
   offers. When no card can be placed — the application will not say where the caret is, or there
   is no display — a notification with the same actions appears instead.
+- **Pause for an hour** is there for the meeting or the deadline you cannot stop for, and
+  `grammar-pause 15m|1h|off` does the same thing from a shell or a shortcut. The pause is a timestamp
+  rather than a switch, so it ends by itself: nothing has to be remembered the next morning, and a
+  machine that reboots comes back checking. `grammar-pause` with no argument prints the state, and
+  `grammar-doctor` reports it — a checker that has gone quiet on purpose should be able to say so.
 
 ### Accept and dismiss from the keyboard
 

@@ -19,6 +19,7 @@ use from here, because callers and gates have always reached these names through
 
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 
@@ -264,6 +265,68 @@ def add_blocked(text, app):
     if not name or app_blocked(name, block_list(text)):
         return text or ""
     return (text or "").rstrip("\n") + ("\n" if text else "") + name + "\n"
+
+
+# ---- pausing the whole thing for a while ---------------------------------------------------------
+# The per-app pause above answers "not this application". This answers "not now" — the meeting, the
+# draft, the deadline — and it is a timestamp rather than a flag on purpose: the silence ends by
+# itself, so nothing has to be remembered or undone the next morning, and a machine that reboots
+# comes back checking.
+PAUSE_PATH = os.path.join(
+    os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"),
+    "grammar-server", "paused-until")
+
+# The durations worth naming. Not "off": ending a pause is not a length of time.
+PAUSE_SPECS = {"15m": 900, "1h": 3600, "4h": 14400}
+
+
+def pause_seconds(spec):
+    """A duration like "1h" as seconds, or None when it is not one.
+
+    Junk is refused rather than guessed at: a shortcut with a typo in it must not silence the checker
+    for some default nobody asked for. Bare seconds are accepted so a script can say 90.
+    """
+    text = (spec or "").strip().lower()
+    if text in PAUSE_SPECS:
+        return PAUSE_SPECS[text]
+    return int(text) if text.isdigit() else None
+
+
+def write_pause(seconds, path=None, now=None):
+    """Start a pause of `seconds`, or end it when that is 0 or None. Returns when it ends."""
+    path = path or PAUSE_PATH
+    if not seconds:
+        clear_pause(path)
+        return 0.0
+    until = (time.time() if now is None else now) + seconds
+    if os.path.dirname(path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as fh:
+        fh.write("%d\n" % until)
+    return until
+
+
+def clear_pause(path=None):
+    """End any pause: the file is the pause, so removing it is ending it."""
+    try:
+        os.remove(path or PAUSE_PATH)
+    except OSError:
+        pass
+
+
+def paused_until(path=None, now=None):
+    """When the pause ends, or 0.0 when the checker is not paused.
+
+    An expired timestamp counts as not paused — the silence ends by itself — and a file that cannot be
+    read or parsed is not a pause either: a corrupt timestamp must never be able to silence the
+    checker forever, which is the one failure mode this design could have had.
+    """
+    try:
+        with open(path or PAUSE_PATH) as fh:
+            until = float(fh.read().strip())
+    except (OSError, ValueError):
+        return 0.0
+    return until if until > (time.time() if now is None else now) else 0.0
 
 
 # ---- the keyboard route to a card's answer -------------------------------------------------------

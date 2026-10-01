@@ -29,6 +29,7 @@ install:
 	install -m755 desktop/grammar-popup.py $(BINDIR)/grammar-popup.py
 	install -m755 desktop/grammar-doctor.py $(BINDIR)/grammar-doctor
 	install -m755 desktop/grammar-action.py $(BINDIR)/grammar-action
+	install -m755 desktop/grammar-pause.py $(BINDIR)/grammar-pause
 	install -m644 desktop/grammar_core.py $(BINDIR)/grammar_core.py
 	install -m644 desktop/grammar-card.qml $(BINDIR)/grammar-card.qml
 	sed 's|@BINDIR@|$(BINDIR)|' deployments/grammar-lookup.desktop > $(APPDIR)/grammar-lookup.desktop
@@ -46,6 +47,7 @@ install:
 	@echo "  Ctrl+Alt+C       Check my selection        (grammar-lookup)"
 	@echo "  Ctrl+Alt+Return  Accept the suggestion     (grammar-action accept)"
 	@echo "  Ctrl+Alt+Escape  Dismiss the suggestion    (grammar-action dismiss)"
+	@echo "Or, any time:      grammar-pause 1h|15m|off  # quiet for a while, or back now"
 	@echo "A binding takes effect at the next login: kglobalaccel reads its config when it starts."
 
 uninstall:
@@ -53,6 +55,7 @@ uninstall:
 	rm -f $(UNITDIR)/grammar-watch.service
 	rm -f $(BINDIR)/grammar-lookup $(BINDIR)/grammar-watch $(BINDIR)/grammar-popup.py
 	rm -f $(BINDIR)/grammar-action
+	rm -f $(BINDIR)/grammar-pause
 	rm -f $(APPDIR)/grammar-lookup.desktop $(APPDIR)/grammar-settings.desktop
 	rm -f $(APPDIR)/grammar-accept.desktop $(APPDIR)/grammar-dismiss.desktop
 	rm -f $(ICONDIR)/grammar-ui.svg

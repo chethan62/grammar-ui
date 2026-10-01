@@ -220,6 +220,14 @@ Window {
                 text: "Ignore in " + card.payload.app
                 onClicked: bridge.choose("ignore-app", "")
             }
+            // "Not now" rather than "not this application": the same one-click idea, for a meeting
+            // or a deadline. It ends by itself, so the card does not have to offer a way back.
+            Act {
+                flat: true
+                anchors.right: parent.right
+                text: "Pause for an hour"
+                onClicked: bridge.choose("pause-hour", "")
+            }
 
             // ---- the model's own answers --------------------------------------------------
             Rule { visible: card.canRephrase }

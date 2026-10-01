@@ -139,6 +139,58 @@ def test_blocklist():
        "and the result blocks the application that was added")
 
 
+def test_pause():
+    """The "not now" pause: what it silences, and the ways it must never silence anything.
+
+    The file is the pause, so this is file handling — which is exactly where a checker could go quiet
+    by accident: an unreadable file, a corrupt timestamp, or a clock that has moved on. None of those
+    may count as a pause, or "quiet for an hour" can become quiet forever.
+    """
+    path = os.path.join(tempfile.mkdtemp(prefix="grammar-pause-"), "paused-until")
+    now = 1_000_000.0
+    import grammar_core              # the watcher re-exports only what it uses; this is the CLI's
+    ok(grammar_core.pause_seconds("15m") == 900 and grammar_core.pause_seconds("1H") == 3600,
+       "the named durations are durations, whatever the case")
+    ok(grammar_core.pause_seconds("90") == 90, "and bare seconds are seconds, for scripts")
+    ok(grammar_core.pause_seconds("soon") is None and grammar_core.pause_seconds("") is None,
+       "anything else is not a length of time, so nothing is guessed")
+    ok(watch.paused_until(path, now) == 0.0, "no file is no pause")
+
+    until = watch.write_pause(3600, path, now)
+    ok(until == now + 3600 and watch.paused_until(path, now) == until, "a pause is a timestamp")
+    ok(watch.paused_until(path, now + 3600) == 0.0,
+       "an expired timestamp is not a pause: the silence ends by itself")
+    ok(watch.paused_until(path, now + 3599) == until, "and a second earlier it still is")
+    with open(path, "w") as fh:
+        fh.write("not a timestamp\n")
+    ok(watch.paused_until(path, now) == 0.0,
+       "a corrupt file is not a pause either, so it cannot silence the checker forever")
+    watch.write_pause(600, path, now)
+    watch.clear_pause(path)
+    ok(watch.paused_until(path, now) == 0.0, "and off means off")
+
+    # What the watcher does with it: skip everything without reading the application, and start a
+    # pause when the card asks — routed from the card's own answer, before any of the text guards.
+    class Target:
+        def get_state_set(self):
+            raise AssertionError("a paused checker must not read the application at all")
+
+    watched = []
+    w = watch.Watcher.__new__(watch.Watcher)
+    w.target, w.busy, w.timer = Target(), False, None
+    w.ask = lambda issue, pos=None: {"action": "pause-hour"}
+    real_pause, real_which = watch.paused_until, watch.shutil
+    watch.paused_until = lambda *a, **k: now + 60
+    watch.shutil = type("S", (), {"which": staticmethod(lambda name: None)})   # no test toast
+    try:
+        ok(w.check() is False, "a paused checker returns before touching anything")
+        w.pause_for = lambda seconds: watched.append(seconds)
+        w.offer(0, 2, "go", "goes", {"span": [0, 2]})
+    finally:
+        watch.paused_until, watch.shutil = real_pause, real_which
+    ok(watched == [3600], "the card's own answer asks for an hour: %r" % watched)
+
+
 def test_reexports():
     """Anything this module uses that only exists in grammar_core has to be imported.
 
@@ -805,6 +857,7 @@ def main():
     test_window()
     test_suggestions()
     test_blocklist()
+    test_pause()
     test_reexports()
     test_notification(tmp)
     test_module_loading(tmp)

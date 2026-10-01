@@ -19,9 +19,12 @@ The chain, in order, each line carrying the fix rather than just the symptom:
     watcher      the typing watcher unit
     bus          the accessibility bus, and what it can actually see
     card         Qt and the card file, which is what the pop-up needs
+    entries      the menu entries, and the icon they name
+    pause        whether the checker is paused — which is often the whole answer
 
-Exit 0 when the essential chain works, 1 otherwise. Optional pieces (the model, the menu entries)
-are reported and never decide the verdict: rewriting being off is a supported state, not a fault.
+Exit 0 when the essential chain works, 1 otherwise. Optional pieces (the model, the menu entries, a
+pause) are reported and never decide the verdict: rewriting being off is a supported state, not a
+fault, and a pause is something a person asked for.
 """
 
 import json
@@ -29,6 +32,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -50,7 +54,7 @@ TIMEOUT = 6
 # default. One source for that value rather than a second literal. The path insert is needed
 # because this file gets run by path as often as it is run installed.
 sys.path.insert(0, HERE)
-from grammar_core import DEFAULT_API  # noqa: E402
+from grammar_core import DEFAULT_API, paused_until  # noqa: E402
 
 # The one sentence this project has measured the engine against all along. Proved to be flagged
 # (HE_VERB_AGR + UPPERCASE_SENTENCE_START) while "This sentence have an error." is not — the
@@ -117,7 +121,7 @@ def check_install(bindir=None):
     """
     bindir = bindir or BINDIR
     wanted = ("grammar-lookup", "grammar-watch", "grammar-popup.py", "grammar-doctor",
-              "grammar-action", "grammar_core.py", "grammar-card.qml")
+              "grammar-action", "grammar-pause", "grammar_core.py", "grammar-card.qml")
     missing = [name for name in wanted if not os.path.exists(os.path.join(bindir, name))]
     if missing:
         return (True, False, "missing from %s: %s" % (bindir, ", ".join(missing)),
@@ -305,6 +309,21 @@ def check_entries():
             % (len(found), ", ".join(sorted(icons)) or "none named"), "")
 
 
+def check_pause(path=None):
+    """Whether the checker is paused — the answer to "why is nothing showing up?" more often than
+    anything else in this list, and a state a person forgets they set.
+
+    A pause is deliberate, so it is reported as a warning rather than a failure: the chain is fine,
+    it has been told to be quiet. The path is a parameter so this can be tested without touching the
+    real state.
+    """
+    until = paused_until(path)
+    if not until:
+        return (False, True, "not paused", "")
+    return (False, False, "paused until %s" % time.strftime("%H:%M", time.localtime(until)),
+            "`grammar-pause off` brings suggestions back now; otherwise the pause ends by itself")
+
+
 def main():
     quiet = "--quiet" in sys.argv[1:]
     base = api_base()
@@ -318,6 +337,7 @@ def main():
         ("bus", check_bus()),
         ("card", check_card()),
         ("entries", check_entries()),
+        ("pause", check_pause()),
     ]
     if not quiet:
         print("grammar-doctor — engine at %s\n" % base)

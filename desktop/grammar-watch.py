@@ -57,8 +57,8 @@ DEBUG = os.environ.get("GRAMMAR_WATCH_DEBUG") == "1"
 # the script is run directly.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from grammar_core import (BACK, CARET_GAP, FORWARD, MIN_CHARS, TAIL, add_blocked, alternatives,
-                          app_blocked, block_list, blocked_apps, first_span, others, parse_reply,
-                          shown, snippet_window, suggestions)
+                          app_blocked, block_list, blocked_apps, clear_pause, first_span, others,
+                          parse_reply, paused_until, shown, snippet_window, suggestions, write_pause)
 
 # The file the per-app pause is kept in — beside the engine's own config, because it is the same
 # question ("what does this machine want?") asked about a different thing. One name per line, and
@@ -288,10 +288,33 @@ class Watcher:
                               "Checking is off in this application. Delete its line from %s "
                               "to bring it back." % BLOCKLIST])
 
+    def pause_for(self, seconds):
+        """Silence the checker for a while — what the card's "Pause for an hour" asks for.
+
+        A timestamp, not a flag: the silence ends by itself, so an interrupted day does not leave the
+        checker off with nothing on screen to say so. The toast names the command that ends it early,
+        because "it will come back in an hour" is only reassuring if you can also make it come back.
+        """
+        until = write_pause(seconds)
+        debug("paused for %ds (until %d)" % (seconds, until))
+        if shutil.which("notify-send"):
+            subprocess.Popen(["notify-send", "-a", "grammar", "-t", "5000",
+                              "Paused for %s" % ("%d minutes" % (seconds // 60) if seconds % 3600
+                                                 else "%d hour%s" % (seconds // 3600,
+                                                                     "" if seconds == 3600 else "s")),
+                              "Suggestions are off until %s. `grammar-pause off` ends it early."
+                              % time.strftime("%H:%M", time.localtime(until))])
+
     # ---- the check ----------------------------------------------------------------------
     def check(self):
         self.timer = None
         if self.busy or self.target is None:
+            return False
+        # "Not now" beats every other consideration, including "not this application": a pause is the
+        # user having said they do not want suggestions at all for a while.
+        until = paused_until()
+        if until:
+            debug("paused until %d" % until)
             return False
         try:
             if not self.target.get_state_set().contains(Atspi.StateType.FOCUSED):
@@ -411,6 +434,10 @@ class Watcher:
                 # Not an edit: this pauses checking in this application, so it is answered before
                 # any of the text guards — there is no text here to have gone stale.
                 self.pause_here()
+                return
+            if action == "pause-hour":
+                # Also not an edit, and also about the future rather than this finding.
+                self.pause_for(3600)
                 return
             if action not in ("replace", "sentence", "copy"):
                 return

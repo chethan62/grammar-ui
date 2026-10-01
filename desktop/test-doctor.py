@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 try:
     import gi  # noqa: F401
@@ -203,11 +204,34 @@ def test_entries_check(doctor):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_pause_row(doctor):
+    """A pause is reported, with when it ends and how to end it early.
+
+    A checker that has gone quiet with no explanation is the worst version of this feature, and the
+    doctor is exactly where "why is nothing showing up?" is supposed to be answered.
+    """
+    tmp = tempfile.mkdtemp(prefix="grammar-pause-")
+    path = os.path.join(tmp, "paused-until")
+    try:
+        essential, okd, detail, fix = doctor.check_pause(path)
+        ok(okd is True and "not paused" in detail, "with no pause the row says so: %r" % detail)
+        with open(path, "w") as fh:
+            fh.write("%d\n" % (time.time() + 600))
+        essential, okd, detail, fix = doctor.check_pause(path)
+        ok(okd is False and "paused until" in detail,
+           "a pause is reported, with the time it ends: %r" % detail)
+        ok(essential is False, "and it is a warning: the checker was told to be quiet, not broken")
+        ok("grammar-pause off" in fix, "with the command that ends it early: %r" % fix)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main():
     doctor = load()
     test_verdict(doctor)
     test_install_check(doctor)
     test_entries_check(doctor)
+    test_pause_row(doctor)
     test_listen_rule(doctor)
     test_listen_row(doctor)
     test_it_can_fail()
