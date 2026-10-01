@@ -611,6 +611,92 @@ def test_live_qt():
         subprocess.run(["pkill", "-x", "kate"], capture_output=True)
 
 
+def test_live_payload():
+    """What the real watcher hands the card, built from a *live* finding.
+
+    The card's "Ignore this word" is drawn from payload["word"], which the watcher computes out of the
+    match objects a real check returns. Every other leg feeds hand-written matches, so a wrong key
+    there would leave the button absent in real use with the whole gate green — and the card's half of
+    that seam (a payload reaching the button) is proven by hand, on screen.
+
+    `ask` is a recorder here, so the payload is caught where it is built rather than rendered: a card
+    cannot be placed from a script on this desktop at all, because placement needs the caret's screen
+    extents and an unfocused window has none. One lie is needed to get this far — the document claims
+    to be FOCUSED, because the watcher refuses an unfocused target on purpose ("a debounce that fired
+    late is stale") and focus is the window manager's to give, here as in the Qt leg.
+    """
+
+    class StateSet:
+        """The real state set, answering FOCUSED = True. The one lie, in one place."""
+
+        def __init__(self, inner):
+            self._inner = inner
+
+        def contains(self, state):
+            if state == Atspi.StateType.FOCUSED:
+                return True
+            return self._inner.contains(state)
+
+    class Focused:
+        """The real document, with that state set. Everything else is delegated unchanged."""
+
+        def __init__(self, document):
+            self._doc = document
+
+        def get_state_set(self):
+            return StateSet(self._doc.get_state_set())
+
+        def __getattr__(self, name):
+            return getattr(self._doc, name)
+
+    app, why = start_kate()
+    if app is None:
+        print("  payload: skipped (%s)" % why)
+        return
+    try:
+        doc = editable_text(app)
+        if doc.get_role_name() not in ("text", "paragraph"):
+            print("  payload: skipped (no document view in kate: %r)" % doc.get_role_name())
+            return
+        sentence = "We are zorbulating the report today."
+        write(doc, sentence)
+
+        seen = []
+        watcher = watch.Watcher(client, cooldown=0.0,
+                                ask=lambda issue, pos=None, **k: (seen.append(issue),
+                                                                  {"action": "", "text": ""})[1])
+        watcher.target = Focused(doc)
+        watcher.app_name = lambda obj=None: "kate"   # the bus's focused app is not kate
+        watcher.check()
+
+        if not seen:
+            # Never a silent pass: no engine, or no finding, is a reason to say which.
+            ok(False, "the watcher offered nothing for %r — no engine, or nothing found" % sentence)
+            return
+        issue = seen[0]
+        print("  payload: %r" % (issue,))
+        ok(issue.get("word") == "zorbulating",
+           "the payload carries the word the finding is about, from a live match: %r"
+           % issue.get("word"))
+        ok(issue.get("old") == "zorbulating", "and the finding's own text: %r" % issue.get("old"))
+        span = issue.get("span") or []
+        ok(span and sentence[span[0]:span[0] + (span[1] - span[0])] == "zorbulating",
+           "with a span that points at it, so a chip replaces the right words: %r" % (span,))
+        ok(issue.get("app") == "kate", "and the application, for the pause button: %r" % issue.get("app"))
+        ok(issue.get("badge", "").startswith("Rules engine"),
+           "and where the finding came from: %r" % issue.get("badge"))
+        # The sentence sent to a model is the *corrected* one, deliberately: handing a small model
+        # your own errors invites it to preserve them. Asserted here because it looks like a bug.
+        ok(issue.get("sentence") == sentence.replace("zorbulating", issue.get("new") or ""),
+           "the sentence offered for a rephrase is the corrected one: %r" % issue.get("sentence"))
+        # `more` is the *other* suggestions, so a finding with one suggestion has none — not a lost
+        # field, and worth pinning because a rule id in there looks more useful than it is.
+        ok(not issue.get("more"),
+           "and 'more' is empty when there is only one suggestion: %r" % issue.get("more"))
+    finally:
+        subprocess.run(["pkill", "-x", "kate"], capture_output=True)
+
+
 def test_module_loading(tmp):
     """The installed client has no .py suffix and the repository one does, so loading by path
     has to work for both. Learned from the service failing its first start after `make
@@ -1036,6 +1122,7 @@ def main():
     test_reexports()
     test_notification(tmp)
     test_module_loading(tmp)
+    test_live_payload()
     test_popup(tmp)
     test_edit_refusal(watch)
     test_listeners()
