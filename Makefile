@@ -33,9 +33,18 @@ check-app:
 	if ! curl -sf -o /dev/null "$$api/status" 2>/dev/null; then \
 	   echo "  app: skipped the endpoint check (no engine at $$api)"; \
 	else \
-	   for p in /v1/ai /v2/ignore; do \
+	   for p in /v1/ai /v2/ignore /v2/languages; do \
 	     curl -sf -o /dev/null "$$api$$p" && echo "  app: $$p answers" \
 	       || { echo "  app: $$p DID NOT ANSWER — the UI calls it"; exit 1; }; \
+	   done; \
+	   for p in /v2/check /v2/rewrite; do \
+	     case "$$p" in \
+	       /v2/check) body='{"text":"a","level":"picky"}' ;; \
+	       *)         body='{"text":"a","intent":"improve"}' ;; \
+	     esac; \
+	     curl -sf -o /dev/null -X POST -H "Content-Type: application/json" -d "$$body" "$$api$$p" \
+	       && echo "  app: POST $$p answers" \
+	       || { echo "  app: POST $$p DID NOT ANSWER — the UI calls it"; exit 1; }; \
 	   done; \
 	fi
 

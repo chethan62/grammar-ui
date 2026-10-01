@@ -93,3 +93,27 @@ select { appearance:none; -webkit-appearance:none; padding-right:28px; backgroun
         position:fixed; left:var(--s3); right:var(--s3); bottom:var(--s3); margin-top:0;
         background:var(--surface); }
 .foot .status { flex:1; color:var(--muted); }
+
+/* ---- tabs ---------------------------------------------------------------------------------------- */
+/* Real buttons in a row, underlined when selected: the whole strip is one line of chrome, and no panel
+   needs a heading to say which one you are looking at. */
+.tabs { display:flex; gap:var(--s3); margin:var(--s3) 0 var(--s2); border-bottom:1px solid var(--border); }
+.tabs button { background:transparent; border:0; border-bottom:2px solid transparent; border-radius:0;
+               height:auto; padding:var(--s2) 2px; color:var(--muted); font-weight:600; }
+.tabs button:hover:not(:disabled) { background:transparent; color:var(--text); }
+.tabs button[aria-selected="true"] { color:var(--text); border-bottom-color:var(--accent); }
+.tabs button:focus-visible { outline-offset:-2px; }
+section[role=tabpanel] { padding-top:var(--s1); }
+section[role=tabpanel] h2.caption:first-child { margin-top:0; }
+
+/* ---- the draft and what the checker found -------------------------------------------------------- */
+/* A textarea is not a one-line control, so it opts out of the 32px height while keeping the same radius,
+   border and padding as everything else. resize:vertical only — the window is what gets sized. */
+textarea { font:inherit; font-size:var(--t-body); color:var(--text); background:var(--chip);
+           border:1px solid var(--border); border-radius:var(--radius); padding:8px 10px; width:100%;
+           min-height:96px; resize:vertical; line-height:1.5; }
+.finding, .candidate { align-items:flex-start; gap:var(--s2); padding:var(--s1) 0; }
+.finding span, .candidate span { flex:1; overflow-wrap:anywhere; }
+.finding button, .candidate button { flex:0 0 auto; }
+.finding + .finding, .candidate + .candidate { border-top:1px solid var(--border); }
+#candidates { margin-top:var(--s2); }
