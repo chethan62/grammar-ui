@@ -83,6 +83,14 @@ We should arrange a meeting to discuss the report.   ← click one to replace th
   returns through the UI thread, because Qt is not thread-safe either and a frozen card is worse than a
   card. The sentence sent is the **corrected** one: handing a small model your own errors invites
   it to preserve them.
+- **The words appear while the model writes them.** The request always asks to stream, and what the
+  card shows above the answers is the model's own text as it arrives — replaced by the parsed
+  answers, with their change lines, when it finishes. On this machine that is about 50 ms to the first
+  words against 1.5–2.5 s for the whole sentence (measured across runs; a cold model adds several
+  seconds to both); before this, the card could only say "Rephrasing…" for that entire time. While it
+  runs the Rephrase button becomes **Cancel**, which stops the read and drops the connection — the
+  engine passes the request on to the model, so the model stops too rather than finishing a sentence
+  nobody will see.
 - **Each answer shows what it changed**, under the answer itself: struck-through and muted for the
   words that went, full contrast for the words that arrived, against the sentence you are about to
   replace. The sentence lives in the application behind the card, so it can never be shown beside the
