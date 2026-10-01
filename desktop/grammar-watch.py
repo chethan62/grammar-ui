@@ -127,10 +127,10 @@ def popup_actions(issue, position):
     second host. It travels on stdin rather than in argv because the alternatives are a list, and
     a list on a command line is a quoting bug waiting to happen.
     """
-    # ponytail: one process per suggestion, so ~586 ms of QML load and window map happens before the card
-    # is visible (measured 2026-10-01 at 81 °C; breakdown in grammar-server docs/architecture.md). A
-    # long-lived card driven over a FIFO removes most of that — build it when the number shows up in the
-    # budget, not before.
+    # ponytail: one process per suggestion, so ~586 ms of Qt start-up and window map happens before the card
+    # is visible (measured 2026-10-01 at 81 °C; QML compilation is ~0 of it — see the A/B in grammar-server
+    # docs/architecture.md). A long-lived card driven over a FIFO removes most of that — build it when the
+    # number shows up in the budget, not before.
     script = os.path.join(HERE, "grammar-popup.py")
     if position is None or not os.path.exists(script):
         return None
