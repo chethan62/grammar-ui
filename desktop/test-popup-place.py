@@ -693,6 +693,17 @@ def test_settings_holds_everything(popup):
        "sorted the way a person reads a list: %r" % view["words"])
     ok(view["pausedApps"] == ["Firefox", "Kate"], "the paused applications: %r" % view["pausedApps"])
     ok(view["pauseNote"] == "not paused", "an expired pause reads as none: %r" % view["pauseNote"])
+    # The list height is the host's measurement of the screen, not a taste: on a 768-tall display the
+    # panel must give way somewhere, and the lists are the only part that can.
+    ok(view["listMax"] == 132, "with no measurement the designed height stands: %r" % view["listMax"])
+    ok(popup.settings_view({"listMax": 90})["listMax"] == 90,
+       "and a short screen's smaller budget is carried through")
+    ok(popup.settings_view({"listMax": 5})["listMax"] == 60,
+       "clamped to something still scrollable rather than to nothing")
+    short = popup.list_max_for(768)
+    ok(short == 104, "a 768-px screen means %d-px lists, so the footer still fits" % short)
+    ok(popup.list_max_for(1080) == 132 and popup.list_max_for(2400) == 132,
+       "a tall screen is capped at the designed height, not stretched")
 
     paused = popup.settings_view({"pauseUntil": time.time() + 3600})
     ok(paused["pauseNote"].startswith("paused for another"),
@@ -705,7 +716,7 @@ def test_settings_holds_everything(popup):
     # check matters just as much — a key the QML still reads after the view stopped sending it is a
     # note that renders as the word "undefined".
     qml = open(os.path.join(HERE, "grammar-card.qml")).read()
-    for key in ("words", "pausedApps", "pauseNote"):
+    for key in ("words", "pausedApps", "pauseNote", "listMax"):
         ok(('"%s"' % key) in qml,
            "the panel draws %r, so renaming either side cannot pass silently" % key)
     for gone in ("wordsMore", "wordsPath"):
@@ -1076,15 +1087,26 @@ def test_live_the_panel_lists_and_removes():
                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL, env=env)
         last = "Allow " + words[-1]
-        button, deadline = None, time.time() + 15
-        while button is None and time.time() < deadline:
-            button = node_named(app_for(proc.pid), last)
-            if button is None:
+        first = "Allow " + words[0]
+        button, seen, deadline = None, None, time.time() + 15
+        while (button is None or seen is None) and time.time() < deadline:
+            app = app_for(proc.pid)
+            button = button or node_named(app, last)
+            seen = seen or node_named(app, first)
+            if button is None or seen is None:
                 time.sleep(0.3)
         ok(button is not None,
            "the panel lists all %d words, including the last one (%r)" % (len(words), last))
         if button is None:
             return
+        # Being in the tree is not being on screen: an item inside a list that collapsed to zero height
+        # is still found by name and still reports an action. Two lists were rendered empty that way
+        # while every assertion above passed, so the first row's own extents are measured here.
+        ok(seen is not None, "the panel's first row is in the tree too")
+        rect = seen.get_component_iface().get_extents(Atspi.CoordType.SCREEN) if seen is not None else None
+        ok(rect is not None and rect.width > 4 and rect.height > 4,
+           "and it is really drawn, not merely in the tree: %s"
+           % ("%dx%d" % (rect.width, rect.height) if rect is not None else "nothing"))
         iface = button.get_action_iface()
         names = [iface.get_action_name(i) for i in range(iface.get_n_actions())]
         iface.do_action(names.index("Press") if "Press" in names else 0)

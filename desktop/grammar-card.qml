@@ -460,14 +460,21 @@ Window {
                 // user is told to look for them.
                 ScrollView {
                     width: parent.width
-                    implicitHeight: Math.min(contentItem.implicitHeight, 132)
+                    // The cap comes from the host, which measures the screen it has to share: on a short
+                    // display the lists shrink, so the panel — and the Save button in its footer —
+                    // stays on screen.
+                    // Measured against the Column below, not the ScrollView's contentItem: that is the
+                    // Flickable's own container, whose implicit height is 0 for a Column child — which
+                    // rendered two empty lists that the accessibility tree still reported in full.
+                    implicitHeight: Math.min(wordsList.implicitHeight, card.s("listMax", 132))
                     clip: true
                     ScrollBar.vertical.policy: ScrollBar.AsNeeded
                     Column {
+                        id: wordsList
                         width: parent.width
                         spacing: 4
-                            Repeater {
-                        model: card.s("words", [])
+                        Repeater {
+                            model: card.s("words", [])
                         delegate: RowLayout {
                             width: parent.width
                             spacing: 6
@@ -508,14 +515,18 @@ Window {
                 // user is told to look for them.
                 ScrollView {
                     width: parent.width
-                    implicitHeight: Math.min(contentItem.implicitHeight, 132)
+                    // The cap comes from the host, which measures the screen it has to share: on a short
+                    // display the lists shrink, so the panel — and the Save button in its footer —
+                    // stays on screen.
+                    implicitHeight: Math.min(appsList.implicitHeight, card.s("listMax", 132))
                     clip: true
                     ScrollBar.vertical.policy: ScrollBar.AsNeeded
                     Column {
+                        id: appsList
                         width: parent.width
                         spacing: 4
-                            Repeater {
-                        model: card.s("pausedApps", [])
+                        Repeater {
+                            model: card.s("pausedApps", [])
                         delegate: RowLayout {
                             width: parent.width
                             spacing: 6

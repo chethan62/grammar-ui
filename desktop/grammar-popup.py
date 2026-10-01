@@ -76,7 +76,7 @@ from grammar_core import (CARET_GAP, KEYBOARD_ACTIONS, MAX_CANDIDATES, MAX_CHIPS
                          REPHRASE_TIMEOUT,
                          TONES, INTENTS, DEFAULT_API, action_json, ai_note, api_error_message,
                          blocked_apps, candidates_from, card_colors, change_summary, clamp,
-                         clear_card_action, get_json, parse_payload, post_json, read_blocked,
+                         clear_card_action, get_json, list_max_for, parse_payload, post_json, read_blocked,
                          read_stream, rephrase_body, settings_view,
                          stream_rewrite, take_card_action, paused_until)
 
@@ -406,6 +406,19 @@ class Bridge(QObject):
             return
         self._load_settings()
 
+    def list_max(self):
+        """How tall a scrollable list may be, given the screen it has to share.
+
+        The panel is a column that sizes to its content, so the only part that can give way is the part
+        that scrolls. Measured: its fixed content is ~520 px and each list adds up to 132 on top, so on
+        a screen with less room than that budget the lists shrink rather than the panel running off the
+        bottom — and the footer, with Save on it, stays where it can be clicked.
+        """
+        try:
+            return list_max_for(self.window.screen().availableGeometry().height())
+        except Exception:
+            return list_max_for(1080)   # no screen to ask: the display this was designed on
+
     def _load_settings(self):
         code, state = get_json(self.api_base + "/v1/ai")
         if code == 200:
@@ -422,7 +435,7 @@ class Bridge(QObject):
                 # way every other engine failure in this file is said.
                 words_status = api_error_message(words_answer, words_code)
             extra = {"words": words_list, "pausedApps": blocked_apps(read_blocked()),
-                     "pauseUntil": paused_until()}
+                     "pauseUntil": paused_until(), "listMax": self.list_max()}
             self.window.setProperty("settings", settings_view(dict(state, **extra)))
             # Written once, last: "Asking the engine…" is stale the moment this succeeds, and the words
             # failure above must not be wiped by a later clear.
@@ -552,11 +565,14 @@ def main():
                              int(opts["caret-h"] or 0))
             else:
                 # The settings panel has no caret to sit beside, and an override-redirect window
-                # that is never placed lands in the corner: centre it on the primary screen.
+                # that is never placed lands in the corner: centre it on the primary screen — then
+                # clamp, because centring a window taller than the screen puts its bottom edge below
+                # it, and the footer with Save on it is exactly what would fall off.
                 asked = "centred"
                 g = app.primaryScreen().geometry()
                 x = g.x() + (g.width() - window.width()) // 2
                 y = g.y() + (g.height() - window.height()) // 2
+                x, y = clamp(x, y, window.width(), window.height(), monitors, 0)
             # The position is ours to set: the window is override-redirect, which is also why the
             # panel has its own drag. The size is reported with it — a card that maps at 1x1 and
             # positions "fine" is the failure this line exists to make visible.
