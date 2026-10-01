@@ -693,17 +693,16 @@ def test_settings_holds_everything(popup):
        "sorted the way a person reads a list: %r" % view["words"])
     ok(view["pausedApps"] == ["Firefox", "Kate"], "the paused applications: %r" % view["pausedApps"])
     ok(view["pauseNote"] == "not paused", "an expired pause reads as none: %r" % view["pauseNote"])
-    # The list height is the host's measurement of the screen, not a taste: on a 768-tall display the
-    # panel must give way somewhere, and the lists are the only part that can.
-    ok(view["listMax"] == 132, "with no measurement the designed height stands: %r" % view["listMax"])
-    ok(popup.settings_view({"listMax": 90})["listMax"] == 90,
-       "and a short screen's smaller budget is carried through")
-    ok(popup.settings_view({"listMax": 5})["listMax"] == 60,
-       "clamped to something still scrollable rather than to nothing")
-    short = popup.list_max_for(768)
-    ok(short == 104, "a 768-px screen means %d-px lists, so the footer still fits" % short)
-    ok(popup.list_max_for(1080) == 132 and popup.list_max_for(2400) == 132,
-       "a tall screen is capped at the designed height, not stretched")
+    # The panel's height budget is the host's measurement of the screen, not a taste: on a 600-tall
+    # display the whole panel has to give way, because its fixed content is ~709 px on its own.
+    ok(view["panelMax"] == 100000, "with no measurement the panel sizes to its content: %r" % view["panelMax"])
+    ok(popup.settings_view({"panelMax": 900})["panelMax"] == 900,
+       "and a screen's budget is carried through")
+    ok(popup.settings_view({"panelMax": 5})["panelMax"] == 320,
+       "floored, so a tiny screen still gets a region rather than a slit")
+    ok(popup.panel_max_for(1080) == 1000 and popup.panel_max_for(600) == 520,
+       "screen minus the margins is the budget: %d at 1080" % popup.panel_max_for(1080))
+    ok(popup.panel_max_for(200) == 320, "and a sliver of a screen still gets the floor")
 
     paused = popup.settings_view({"pauseUntil": time.time() + 3600})
     ok(paused["pauseNote"].startswith("paused for another"),
@@ -716,7 +715,7 @@ def test_settings_holds_everything(popup):
     # check matters just as much — a key the QML still reads after the view stopped sending it is a
     # note that renders as the word "undefined".
     qml = open(os.path.join(HERE, "grammar-card.qml")).read()
-    for key in ("words", "pausedApps", "pauseNote", "listMax"):
+    for key in ("words", "pausedApps", "pauseNote", "panelMax"):
         ok(('"%s"' % key) in qml,
            "the panel draws %r, so renaming either side cannot pass silently" % key)
     for gone in ("wordsMore", "wordsPath"):

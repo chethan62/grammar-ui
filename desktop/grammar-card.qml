@@ -104,7 +104,7 @@ Window {
         // rather than derived: sizing a column from children that wrap to the parent's width is a
         // binding cycle, and it clipped the rephrase row off the right edge (measured).
         implicitWidth: 436
-        implicitHeight: (card.view === "settings" ? settingsPanel.implicitHeight
+        implicitHeight: (card.view === "settings" ? panelScroll.implicitHeight
                                                   : findingPanel.implicitHeight) + 28
         // The layer stays on for both views: it is what the card's shadow and rounded corners are
         // drawn with, and the card is the class both views use.
@@ -347,130 +347,134 @@ Window {
         // per-application pauses, the pause) first, because that is the checking half and the half
         // most settings belong to — and the AI runner below in its own labelled group, because it is
         // one choice, not the subject of the window.
-        Column {
-            id: settingsPanel
+        // The whole panel scrolls as one region. Its fixed content alone measures ~709 px, so on a
+        // screen shorter than that the two lists have nothing left to give up, and a window taller
+        // than the display leaves clamp() able to push the footer — with Save on it — off one edge.
+        // One scrollbar for the panel also removes the two nested lists, where the wheel went to
+        // whichever list happened to be under the cursor.
+        ScrollView {
+            id: panelScroll
             x: 14
             y: 14
-            spacing: 10
             width: 408
+            contentWidth: availableWidth
             visible: card.view === "settings"
+            implicitHeight: Math.min(settingsPanel.implicitHeight, card.s("panelMax", 100000))
+            clip: true
+            ScrollBar.vertical.policy: ScrollBar.AsNeeded
 
-            // ---- header: what this is, and how it is doing ----------------------------------
-            // This row is the panel's titlebar, because the window is override-redirect: a
-            // compositor will not move a window it does not manage, so dragging is ours and the
-            // close is ours. A glyph would be one font away from tofu, so the ✕ is drawn.
-            Item {
-                width: parent.width
-                implicitHeight: headerRow.implicitHeight
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.SizeAllCursor
-                    // Incremental, not from the press point: passing the total delta to a
-                    // position-setting move would apply it again on every event and run away.
-                    property point from: Qt.point(0, 0)
-                    onPressed: from = Qt.point(mouse.x, mouse.y)
-                    onPositionChanged: {
-                        card.dragBy(mouse.x - from.x, mouse.y - from.y)
-                        from = Qt.point(mouse.x, mouse.y)
-                    }
-                }
-                RowLayout {
-                    id: headerRow
-                    anchors.fill: parent
-                    spacing: 8
-                    Text {
-                        Layout.fillWidth: true
-                        text: "Settings"
-                        font.pixelSize: 17
-                        font.weight: Font.DemiBold
-                        color: card.c("text", "#14181d")
-                    }
-                    // A dot and one word, so the state reads at a glance instead of being buried in
-                    // a sentence. The sentence is still there, under the buttons.
-                    Row {
-                        spacing: 6
-                        Rectangle {
-                            width: 7
-                            height: 7
-                            radius: 3.5
-                            anchors.verticalCenter: parent.verticalCenter
-                            color: {
-                                var t = card.s("tone", "idle")
-                                if (t === "good") return "#2f9e57"
-                                if (t === "warn") return "#d9822b"
-                                if (t === "bad") return "#cf4b3f"
-                                return card.c("faint", "#8a93a0")
-                            }
-                        }
-                        Text {
-                            text: {
-                                var t = card.s("tone", "idle")
-                                if (t === "good") return "working"
-                                if (t === "warn") return "unverified"
-                                if (t === "bad") return "not answering"
-                                return "off"
-                            }
-                            font.pixelSize: 12
-                            color: card.c("muted", "#5a6472")
-                        }
-                    }
-                    Act {
-                        flat: true
-                        implicitWidth: 26
-                        // "Close panel" is the accessible name, not something drawn: the contentItem
-                        // below is the vector ✕. Distinct from the footer's "Close" so both are
-                        // findable — a button with no name is a button no test can press.
-                        text: "Close panel"
-                        Accessible.description: "Close the settings panel"
-                        onClicked: bridge.choose("", "")
-                        contentItem: Item {
-                            Rectangle {
-                                width: 11
-                                height: 1.5
-                                rotation: 45
-                                anchors.centerIn: parent
-                                color: card.c("muted", "#5a6472")
-                            }
-                            Rectangle {
-                                width: 11
-                                height: 1.5
-                                rotation: -45
-                                anchors.centerIn: parent
-                                color: card.c("muted", "#5a6472")
-                            }
-                        }
-                    }
-                }
-            }
-            // ---- the settings that used to have no window at all -----------------------------
-            // A word could be added from a card's "Ignore this word" and only a text editor could take
-            // it back; "Ignore in <application>" had exactly the same problem. They live here now, so
-            // one window holds every setting this product has — which is why the panel exists and a
-            // menu does not.
-            Rule {}
+            Column {
+                id: settingsPanel
+                spacing: 10
+                width: 408
 
-            Field {
-                label: "IGNORED WORDS"
-                note: card.s("words", []).length
-                      ? "The engine stops reporting these; removing one brings the findings back."
-                      : "Nothing ignored yet. \"Ignore this word\" on a card adds one."
-                // Bounded, so the window stays a window: the list scrolls inside it instead of
-                // growing the panel. Eight ignored words used to make it 785 px tall, and the cap
-                // that hid the rest was a worse answer than a scrollbar — this panel is where the
-                // user is told to look for them.
-                ScrollView {
+                // ---- header: what this is, and how it is doing ----------------------------------
+                // This row is the panel's titlebar, because the window is override-redirect: a
+                // compositor will not move a window it does not manage, so dragging is ours and the
+                // close is ours. A glyph would be one font away from tofu, so the ✕ is drawn.
+                Item {
                     width: parent.width
-                    // The cap comes from the host, which measures the screen it has to share: on a short
-                    // display the lists shrink, so the panel — and the Save button in its footer —
-                    // stays on screen.
-                    // Measured against the Column below, not the ScrollView's contentItem: that is the
-                    // Flickable's own container, whose implicit height is 0 for a Column child — which
-                    // rendered two empty lists that the accessibility tree still reported in full.
-                    implicitHeight: Math.min(wordsList.implicitHeight, card.s("listMax", 132))
-                    clip: true
-                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
-                    Column {
-                        id: wordsList
+                    implicitHeight: headerRow.implicitHeight
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.SizeAllCursor
+            // The panel is dragged by this row and the window is override-redirect, so the
+            // drag must not be stolen by the scroll view that now wraps it.
+            preventStealing: true
+                        // Incremental, not from the press point: passing the total delta to a
+                        // position-setting move would apply it again on every event and run away.
+                        property point from: Qt.point(0, 0)
+                        onPressed: from = Qt.point(mouse.x, mouse.y)
+                        onPositionChanged: {
+                            card.dragBy(mouse.x - from.x, mouse.y - from.y)
+                            from = Qt.point(mouse.x, mouse.y)
+                        }
+                    }
+                    RowLayout {
+                        id: headerRow
+                        anchors.fill: parent
+                        spacing: 8
+                        Text {
+                            Layout.fillWidth: true
+                            text: "Settings"
+                            font.pixelSize: 17
+                            font.weight: Font.DemiBold
+                            color: card.c("text", "#14181d")
+                        }
+                        // A dot and one word, so the state reads at a glance instead of being buried in
+                        // a sentence. The sentence is still there, under the buttons.
+                        Row {
+                            spacing: 6
+                            Rectangle {
+                                width: 7
+                                height: 7
+                                radius: 3.5
+                                anchors.verticalCenter: parent.verticalCenter
+                                color: {
+                                    var t = card.s("tone", "idle")
+                                    if (t === "good") return "#2f9e57"
+                                    if (t === "warn") return "#d9822b"
+                                    if (t === "bad") return "#cf4b3f"
+                                    return card.c("faint", "#8a93a0")
+                                }
+                            }
+                            Text {
+                                text: {
+                                    var t = card.s("tone", "idle")
+                                    if (t === "good") return "working"
+                                    if (t === "warn") return "unverified"
+                                    if (t === "bad") return "not answering"
+                                    return "off"
+                                }
+                                font.pixelSize: 12
+                                color: card.c("muted", "#5a6472")
+                            }
+                        }
+                        Act {
+                            flat: true
+                            implicitWidth: 26
+                            // "Close panel" is the accessible name, not something drawn: the contentItem
+                            // below is the vector ✕. Distinct from the footer's "Close" so both are
+                            // findable — a button with no name is a button no test can press.
+                            text: "Close panel"
+                            Accessible.description: "Close the settings panel"
+                            onClicked: bridge.choose("", "")
+                            contentItem: Item {
+                                Rectangle {
+                                    width: 11
+                                    height: 1.5
+                                    rotation: 45
+                                    anchors.centerIn: parent
+                                    color: card.c("muted", "#5a6472")
+                                }
+                                Rectangle {
+                                    width: 11
+                                    height: 1.5
+                                    rotation: -45
+                                    anchors.centerIn: parent
+                                    color: card.c("muted", "#5a6472")
+                                }
+                            }
+                        }
+                    }
+                }
+                // ---- the settings that used to have no window at all -----------------------------
+                // A word could be added from a card's "Ignore this word" and only a text editor could take
+                // it back; "Ignore in <application>" had exactly the same problem. They live here now, so
+                // one window holds every setting this product has — which is why the panel exists and a
+                // menu does not.
+                Rule {}
+
+                Field {
+                    label: "IGNORED WORDS"
+                    note: card.s("words", []).length
+                          ? "The engine stops reporting these; removing one brings the findings back."
+                          : "Nothing ignored yet. \"Ignore this word\" on a card adds one."
+                    // Bounded, so the window stays a window: the list scrolls inside it instead of
+                    // growing the panel. Eight ignored words used to make it 785 px tall, and the cap
+                    // that hid the rest was a worse answer than a scrollbar — this panel is where the
+                    // user is told to look for them.
+        Column {
                         width: parent.width
                         spacing: 4
                         Repeater {
@@ -499,30 +503,21 @@ Window {
                         }
                     }
                     }
-                }            }
+        }
 
-            Rule {}
+                Rule {}
 
-            Field {
-                label: "PAUSED APPLICATIONS"
-                note: card.s("pausedApps", []).length
-                      ? "Checked nowhere until you resume them. Password managers and terminals are "
-                        + "always left alone and are not listed."
-                      : "Nothing paused. \"Ignore in <application>\" on a card pauses one."
-                // Bounded, so the window stays a window: the list scrolls inside it instead of
-                // growing the panel. Eight ignored words used to make it 785 px tall, and the cap
-                // that hid the rest was a worse answer than a scrollbar — this panel is where the
-                // user is told to look for them.
-                ScrollView {
-                    width: parent.width
-                    // The cap comes from the host, which measures the screen it has to share: on a short
-                    // display the lists shrink, so the panel — and the Save button in its footer —
-                    // stays on screen.
-                    implicitHeight: Math.min(appsList.implicitHeight, card.s("listMax", 132))
-                    clip: true
-                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
-                    Column {
-                        id: appsList
+                Field {
+                    label: "PAUSED APPLICATIONS"
+                    note: card.s("pausedApps", []).length
+                          ? "Checked nowhere until you resume them. Password managers and terminals are "
+                            + "always left alone and are not listed."
+                          : "Nothing paused. \"Ignore in <application>\" on a card pauses one."
+                    // Bounded, so the window stays a window: the list scrolls inside it instead of
+                    // growing the panel. Eight ignored words used to make it 785 px tall, and the cap
+                    // that hid the rest was a worse answer than a scrollbar — this panel is where the
+                    // user is told to look for them.
+        Column {
                         width: parent.width
                         spacing: 4
                         Repeater {
@@ -546,180 +541,181 @@ Window {
                         }
                     }
                     }
-                }            }
+        }
 
-            Rule {}
+                Rule {}
 
-            Field {
-                label: "PAUSE"
-                note: card.s("pauseNote", "not paused")
-                Row {
-                    width: parent.width
-                    spacing: 6
-                    Act { text: "Pause for an hour"; onClicked: bridge.pauseHour() }
-                    Act { text: "Check again now"; onClicked: bridge.resumeNow() }
-                }
-            }
-
-            Rule {}
-
-            Caption { text: "AI SETTINGS" }
-
-            Text {
-                width: parent.width
-                text: "Which model rephrases your sentences. Checking your writing works either "
-                      + "way — this affects Rephrase only, and the choice survives a restart."
-                font.pixelSize: 12
-                color: card.c("muted", "#5a6472")
-                wrapMode: Text.WordWrap
-            }
-
-            Rule {}
-
-            Field {
-                label: "RUNNER"
-                note: {
-                    var p = card.s("presets", [])[runnerBox.currentIndex] || ({})
-                    return p.local === false ? "Cloud: what you rephrase leaves this machine."
-                                             : "Local: nothing leaves this machine."
-                }
-                ComboBox {
-                    id: runnerBox
-                    width: parent.width
-                    model: card.s("presets", [])
-                    textRole: "label"
-                    valueRole: "id"
-                    // Follows what is configured, and re-follows it when a save returns a new state.
-                    currentIndex: {
-                        var ps = card.s("presets", [])
-                        var want = card.s("provider", "")
-                        for (var i = 0; i < ps.length; i++) {
-                            if (ps[i].id === want) return i
-                        }
-                        return -1
-                    }
-                    onActivated: {
-                        // Picking a product fills in its defaults, because nobody remembers that
-                        // LM Studio listens on 1234. Both fields stay editable for anything
-                        // unlisted, and typing an address does not wipe a model already chosen.
-                        var p = card.s("presets", [])[currentIndex] || ({})
-                        urlField.text = p.url || ""
-                        if (p.model) modelBox.editText = p.model
+                Field {
+                    label: "PAUSE"
+                    note: card.s("pauseNote", "not paused")
+                    Row {
+                        width: parent.width
+                        spacing: 6
+                        Act { text: "Pause for an hour"; onClicked: bridge.pauseHour() }
+                        Act { text: "Check again now"; onClicked: bridge.resumeNow() }
                     }
                 }
-            }
 
-            Field {
-                label: "ADDRESS"
-                note: "The base URL of the server, no /v1 needed at the end."
-                TextField {
-                    id: urlField
-                    width: parent.width
-                    text: card.s("url", "")
-                    placeholderText: "http://127.0.0.1:11434"
-                    enabled: card.editable
-                    onAccepted: card.saveRunner()
-                }
-            }
+                Rule {}
 
-            Field {
-                label: "MODEL"
-                // Editable *and* listed: a local server reports what it has loaded, so the list is
-                // the real choice, and a name it does not know can still be typed.
-                note: "What this server reports, or type any model name."
-                ComboBox {
-                    id: modelBox
-                    width: parent.width
-                    editable: true
-                    enabled: card.editable
-                    model: card.s("models", [])
-                    editText: card.s("model", "")
-                }
-            }
+                Caption { text: "AI SETTINGS" }
 
-            Field {
-                // Only for runners that need one: showing an empty password box under a local
-                // server would suggest something is missing when nothing is.
-                visible: card.s("needsKey", false)
-                label: "API KEY"
-                note: card.s("keyNote", "") + " — never sent back, and only settable from that machine."
-                TextField {
-                    id: keyField
-                    width: parent.width
-                    enabled: card.editable
-                    echoMode: TextInput.Password
-                    // Never the stored value: the server reports whether it has one and nothing
-                    // more, so an empty box means "leave it alone" and the note above says which.
-                    placeholderText: card.s("keySet", false)
-                                     ? "a key is saved — type here to replace it"
-                                     : "paste the key"
-                    onAccepted: card.saveRunner()
-                }
-            }
-
-            Text {
-                width: parent.width
-                visible: text.length > 0
-                text: card.s("hint", "")
-                font.pixelSize: 11
-                color: card.c("faint", "#8a93a0")
-                wrapMode: Text.WordWrap
-            }
-
-            // The honest bits: a cloud backend, a key not set yet, or a request from another
-            // machine that may not change anything. Each one is the server's own finding, passed
-            // through rather than invented here.
-            Repeater {
-                model: card.s("warnings", [])
-                delegate: Row {
-                    required property string modelData
-                    width: settingsPanel.width
-                    spacing: 7
-                    Rectangle {
-                        width: 6
-                        height: 6
-                        radius: 3
-                        color: "#d9822b"
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-                    Text {
-                        width: settingsPanel.width - 13
-                        text: modelData
-                        font.pixelSize: 12
-                        color: card.c("muted", "#5a6472")
-                        wrapMode: Text.WordWrap
-                    }
-                }
-            }
-
-            RowLayout {
-                width: parent.width
-                spacing: 6
                 Text {
-                    Layout.fillWidth: true
-                    text: card.status.length > 0 ? card.status : card.s("status", "")
+                    width: parent.width
+                    text: "Which model rephrases your sentences. Checking your writing works either "
+                          + "way — this affects Rephrase only, and the choice survives a restart."
                     font.pixelSize: 12
                     color: card.c("muted", "#5a6472")
                     wrapMode: Text.WordWrap
                 }
-                Act { text: "Close"; onClicked: bridge.choose("", "") }
-                Act {
-                    text: "Test"
-                    // The same round trip as Save: /v1/ai asks the backend for its model list, so
-                    // one call answers both "is it up" and "what may I pick".
-                    onClicked: {
-                        card.status = ""
-                        bridge.loadSettings()
+
+                Rule {}
+
+                Field {
+                    label: "RUNNER"
+                    note: {
+                        var p = card.s("presets", [])[runnerBox.currentIndex] || ({})
+                        return p.local === false ? "Cloud: what you rephrase leaves this machine."
+                                                 : "Local: nothing leaves this machine."
+                    }
+                    ComboBox {
+                        id: runnerBox
+                        width: parent.width
+                        model: card.s("presets", [])
+                        textRole: "label"
+                        valueRole: "id"
+                        // Follows what is configured, and re-follows it when a save returns a new state.
+                        currentIndex: {
+                            var ps = card.s("presets", [])
+                            var want = card.s("provider", "")
+                            for (var i = 0; i < ps.length; i++) {
+                                if (ps[i].id === want) return i
+                            }
+                            return -1
+                        }
+                        onActivated: {
+                            // Picking a product fills in its defaults, because nobody remembers that
+                            // LM Studio listens on 1234. Both fields stay editable for anything
+                            // unlisted, and typing an address does not wipe a model already chosen.
+                            var p = card.s("presets", [])[currentIndex] || ({})
+                            urlField.text = p.url || ""
+                            if (p.model) modelBox.editText = p.model
+                        }
                     }
                 }
-                Act {
-                    text: "Save"
-                    primary: true
-                    enabled: card.editable
-                    onClicked: card.saveRunner()
+
+                Field {
+                    label: "ADDRESS"
+                    note: "The base URL of the server, no /v1 needed at the end."
+                    TextField {
+                        id: urlField
+                        width: parent.width
+                        text: card.s("url", "")
+                        placeholderText: "http://127.0.0.1:11434"
+                        enabled: card.editable
+                        onAccepted: card.saveRunner()
+                    }
+                }
+
+                Field {
+                    label: "MODEL"
+                    // Editable *and* listed: a local server reports what it has loaded, so the list is
+                    // the real choice, and a name it does not know can still be typed.
+                    note: "What this server reports, or type any model name."
+                    ComboBox {
+                        id: modelBox
+                        width: parent.width
+                        editable: true
+                        enabled: card.editable
+                        model: card.s("models", [])
+                        editText: card.s("model", "")
+                    }
+                }
+
+                Field {
+                    // Only for runners that need one: showing an empty password box under a local
+                    // server would suggest something is missing when nothing is.
+                    visible: card.s("needsKey", false)
+                    label: "API KEY"
+                    note: card.s("keyNote", "") + " — never sent back, and only settable from that machine."
+                    TextField {
+                        id: keyField
+                        width: parent.width
+                        enabled: card.editable
+                        echoMode: TextInput.Password
+                        // Never the stored value: the server reports whether it has one and nothing
+                        // more, so an empty box means "leave it alone" and the note above says which.
+                        placeholderText: card.s("keySet", false)
+                                         ? "a key is saved — type here to replace it"
+                                         : "paste the key"
+                        onAccepted: card.saveRunner()
+                    }
+                }
+
+                Text {
+                    width: parent.width
+                    visible: text.length > 0
+                    text: card.s("hint", "")
+                    font.pixelSize: 11
+                    color: card.c("faint", "#8a93a0")
+                    wrapMode: Text.WordWrap
+                }
+
+                // The honest bits: a cloud backend, a key not set yet, or a request from another
+                // machine that may not change anything. Each one is the server's own finding, passed
+                // through rather than invented here.
+                Repeater {
+                    model: card.s("warnings", [])
+                    delegate: Row {
+                        required property string modelData
+                        width: settingsPanel.width
+                        spacing: 7
+                        Rectangle {
+                            width: 6
+                            height: 6
+                            radius: 3
+                            color: "#d9822b"
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                        Text {
+                            width: settingsPanel.width - 13
+                            text: modelData
+                            font.pixelSize: 12
+                            color: card.c("muted", "#5a6472")
+                            wrapMode: Text.WordWrap
+                        }
+                    }
+                }
+
+                RowLayout {
+                    width: parent.width
+                    spacing: 6
+                    Text {
+                        Layout.fillWidth: true
+                        text: card.status.length > 0 ? card.status : card.s("status", "")
+                        font.pixelSize: 12
+                        color: card.c("muted", "#5a6472")
+                        wrapMode: Text.WordWrap
+                    }
+                    Act { text: "Close"; onClicked: bridge.choose("", "") }
+                    Act {
+                        text: "Test"
+                        // The same round trip as Save: /v1/ai asks the backend for its model list, so
+                        // one call answers both "is it up" and "what may I pick".
+                        onClicked: {
+                            card.status = ""
+                            bridge.loadSettings()
+                        }
+                    }
+                    Act {
+                        text: "Save"
+                        primary: true
+                        enabled: card.editable
+                        onClicked: card.saveRunner()
+                    }
                 }
             }
-        }
+}
     }
 
     // A hairline and a small heading: the first version was one flat column, so nothing said where

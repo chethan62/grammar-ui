@@ -50,10 +50,10 @@ again on the other side. ✕ or Escape returns to the finding.
   its height arrives with its state a round trip later.
 - **The panel** is centred on the primary screen and then run through the same `clamp()`: centring a
   window taller than the screen would put its footer — with Save on it — off the bottom.
-- **The two scrolling lists** are capped at `list_max_for(screen_height)` px — `(height - 560) / 2`,
-  floored at 60, capped at 132. The 560 is measured: the panel's fixed content is ~520 px with the
-  lists at full height. On a 1080-tall screen that is 132; on a 768-tall screen it is 104, so the panel
-  gives way in the only part that can.
+- **The panel scrolls as one region**, capped at `panel_max_for(screen_height)` px — the screen's height
+  minus 40 px top and bottom, floored at 320. Measured: the panel's fixed content comes to ~709 px with
+  nothing in its lists at all, so below that there is nothing for the two lists to give up between them.
+  One scrollbar for the panel also means the wheel never lands on a list nested inside it.
 - Sizes are reported by the card itself, on stderr, at the moment it places itself:
   `PLACED <x> <y> (asked <x> <y>) size <w>x<h>`. The gate compares that with what it asked for; a card
   that maps at 1×1 and "positions fine" is the failure that line exists to make visible.
@@ -115,10 +115,12 @@ Two rules hold across it:
 Rows are named for what they do *to what* — "Allow flibbertigibbet", "Resume firefox" — because a
 column of buttons all called "Remove" is a list no screen reader, and no test, can tell apart.
 
-**The two lists scroll.** Each lives in a `ScrollView` whose height is `min(<its Column>.implicitHeight,
-listMax)`, measured against the Column and *not* against the ScrollView's `contentItem`: that is the
-Flickable's own container, whose implicit height is 0 for a Column child, which rendered two empty
-lists that the accessibility tree still reported in full.
+**The panel scrolls; the lists do not.** One `ScrollView` wraps the whole panel, its height at
+`min(<the panel Column>.implicitHeight, panelMax)`, measured against the Column and *not* against the
+ScrollView's `contentItem` — that is the Flickable's own container, whose implicit height is 0 for a
+Column child, which once rendered two empty lists that the accessibility tree still reported in full.
+The header's drag sets `preventStealing: true`: without it the Flickable takes the drag that an
+override-redirect window needs in order to be moved at all.
 
 ## 5. The state contract
 
@@ -189,15 +191,6 @@ GRAMMAR_LIVE=1 /usr/bin/python3 desktop/test-popup-place.py    # + the ones that
 ## 9. Deliberately not built
 
 - **A tray icon.** Impossible on this desktop and it fails silently; measured, documented, not rebuilt.
-- **A whole-panel scroll.** Only the lists grow, so only they scroll. Measured, though, the panel is
-  **709 px tall with nothing in the lists at all** — so on a screen shorter than that the lists have
-  nothing left to give, and `clamp()` can only push the footer, with Save on it, off one edge. The fix
-  is one scroll area around the whole panel (or smaller fixed content), not more tuning of the list cap.
-  Not built: the display this runs on has the room. The assertion that would drive it is already
-  available — `PLACED … size WxH` read against a scaled screen (`QT_SCALE_FACTOR`), which is how the
-  709 was measured. A live leg doing exactly that was written and removed again: Qt's `offscreen`
-  platform is the only way to fake a small screen here (no Xvfb, no sudo), and its software renderer
-  segfaults the panel the moment a list has a scrollbar to draw.
 - **A resident card process.** One process per suggestion costs ~586 ms before the card is visible
   (measured: 10 ms interpreter, 120 ms PySide6 import, ~420 ms Qt start-up and window map; QML
   compilation is ~0, which was checked and is a dead end). It is the largest user-felt cost left. The

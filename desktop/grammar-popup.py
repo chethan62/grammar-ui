@@ -76,7 +76,7 @@ from grammar_core import (CARET_GAP, KEYBOARD_ACTIONS, MAX_CANDIDATES, MAX_CHIPS
                          REPHRASE_TIMEOUT,
                          TONES, INTENTS, DEFAULT_API, action_json, ai_note, api_error_message,
                          blocked_apps, candidates_from, card_colors, change_summary, clamp,
-                         clear_card_action, get_json, list_max_for, parse_payload, post_json, read_blocked,
+                         clear_card_action, get_json, panel_max_for, parse_payload, post_json, read_blocked,
                          read_stream, rephrase_body, settings_view,
                          stream_rewrite, take_card_action, paused_until)
 
@@ -406,18 +406,17 @@ class Bridge(QObject):
             return
         self._load_settings()
 
-    def list_max(self):
-        """How tall a scrollable list may be, given the screen it has to share.
+    def panel_max(self):
+        """How tall this window may grow, given the screen it has to share.
 
-        The panel is a column that sizes to its content, so the only part that can give way is the part
-        that scrolls. Measured: its fixed content is ~520 px and each list adds up to 132 on top, so on
-        a screen with less room than that budget the lists shrink rather than the panel running off the
-        bottom — and the footer, with Save on it, stays where it can be clicked.
+        The panel sizes to its content and scrolls as a whole, so this is the one number that has to fit
+        — see panel_max_for for the measurement behind it. Without it a long ignore list makes a window
+        taller than the display, where clamp() can only push the footer off one edge.
         """
         try:
-            return list_max_for(self.window.screen().availableGeometry().height())
+            return panel_max_for(self.window.screen().availableGeometry().height())
         except Exception:
-            return list_max_for(1080)   # no screen to ask: the display this was designed on
+            return panel_max_for(1080)  # no screen to ask: the display this was designed on
 
     def _load_settings(self):
         code, state = get_json(self.api_base + "/v1/ai")
@@ -435,7 +434,7 @@ class Bridge(QObject):
                 # way every other engine failure in this file is said.
                 words_status = api_error_message(words_answer, words_code)
             extra = {"words": words_list, "pausedApps": blocked_apps(read_blocked()),
-                     "pauseUntil": paused_until(), "listMax": self.list_max()}
+                     "pauseUntil": paused_until(), "panelMax": self.panel_max()}
             self.window.setProperty("settings", settings_view(dict(state, **extra)))
             # Written once, last: "Asking the engine…" is stale the moment this succeeds, and the words
             # failure above must not be wiped by a later clear.

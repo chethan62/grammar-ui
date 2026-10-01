@@ -401,15 +401,18 @@ def debounce_ms(last_engine_ms):
     return 1500
 
 
-def list_max_for(screen_height):
-    """How tall a scrollable settings list may be on a screen this tall. Pure, so the arithmetic that
-    keeps the footer on screen is testable without a small screen to test it on.
+def panel_max_for(screen_height):
+    """How tall the settings panel may be on a screen this tall, in pixels. Pure, so the arithmetic that
+    keeps the panel on screen is testable without a small screen to test it on.
 
-    The numbers are measured, not chosen: the panel's fixed content came to ~520 px with the lists at
-    their full 132, so the budget left for two of them is (height - 560) / 2, floored at 60 so a tiny
-    display still scrolls inside something rather than collapsing a list to a sliver.
+    The number is measured, not chosen: the panel's fixed content comes to ~709 px with nothing in its
+    lists at all, so on anything shorter there is nothing left for the lists to give up — which is why
+    the panel scrolls as a whole instead of the lists shrinking one at a time. This leaves 40 px above
+    and below, and floors at 320 so a tiny display still shows a real region rather than a slit.
+
+    ponytail: one number from one measurement on this theme; re-measure if the fixed content grows.
     """
-    return max(60, min(132, (screen_height - 560) // 2))
+    return max(320, screen_height - 80)
 
 
 def pause_note(until, now=None):
@@ -876,5 +879,5 @@ def settings_view(state):
             "pausedApps": apps,
             # How tall the two scrolling lists may be. The host measures it against the screen, so a
             # short display shrinks the lists instead of pushing the panel's footer off the bottom.
-            "listMax": max(60, int(state.get("listMax") or 132)),
+            "panelMax": max(320, int(state.get("panelMax") or 100000)),
             "pauseNote": pause_note(state.get("pauseUntil") or 0)}
