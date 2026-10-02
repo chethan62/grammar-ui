@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Grammar app icon: document with checkmark and grammar symbol -->
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1c2127"/>
+      <stop offset="100%" stop-color="#0f1216"/>
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2f7d4f"/>
+      <stop offset="100%" stop-color="#1e5a36"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Background rounded square -->
+  <rect x="64" y="64" width="896" height="896" rx="180" fill="url(#bgGrad)"/>
+  
+  <!-- Document shape -->
+  <path d="M200 180 L824 180 L824 844 C824 915.6 769.6 974 698 974 L326 974 C254.4 974 200 915.6 200 844 Z" 
+        fill="#ffffff" opacity="0.08"/>
+  
+  <!-- Document folded corner -->
+  <path d="M600 180 L824 180 L824 404 L600 404 Z" fill="#ffffff" opacity="0.12"/>
+  <path d="M600 180 L600 404 L824 404" fill="none" stroke="#ffffff" stroke-width="2" opacity="0.15"/>
+  
+  <!-- Checkmark (grammar correct) -->
+  <path d="M320 480 L448 608 L704 352" 
+        fill="none" stroke="url(#accentGrad)" stroke-width="48" 
+        stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- Grammar symbol (pilcrow/paragraph mark) - represents grammar/editing -->
+  <g transform="translate(640, 560) scale(1.2)">
+    <path d="M0 -120 L0 80 M-60 -40 L60 -40 M-60 -40 L-60 -80 M60 -40 L60 -80" 
+          fill="none" stroke="url(#accentGrad)" stroke-width="24" 
+          stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="0" cy="20" r="16" fill="url(#accentGrad)"/>
+  </g>
+  
+  <!-- Small text lines representing document content -->
+  <g fill="#ffffff" opacity="0.15">
+    <rect x="240" y="280" width="320" height="16" rx="4"/>
+    <rect x="240" y="320" width="400" height="16" rx="4"/>
+    <rect x="240" y="360" width="280" height="16" rx="4"/>
+    <rect x="240" y="440" width="360" height="16" rx="4"/>
+    <rect x="240" y="480" width="300" height="16" rx="4"/>
+  </g>
+</svg>
