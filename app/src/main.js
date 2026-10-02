@@ -502,14 +502,25 @@ function rows(words) {
 
 async function load() {
   try {
-    const [ignored, ai, langs, status] = await Promise.all([
-      call("/v2/ignore"), call("/v1/ai"), call("/v2/languages"), call("/status"),
+    const [ignored, ai, langs, status, pause] = await Promise.all([
+      call("/v2/ignore"), call("/v1/ai"), call("/v2/languages"), call("/status"), call("/v2/pause"),
     ]);
     const words = ignored.words || [];
     $("words").replaceChildren(...rows(words));
     $("wordsNote").textContent = words.length
       ? "The engine stops reporting these; removing one brings the findings back."
       : "Nothing is ignored yet.";
+
+    // Pause status (read-only, owned by grammar-watch/grammar-pause)
+    if (pause.paused) {
+      const until = new Date(pause.until).toLocaleString();
+      $("pauseNote").textContent = "Checker paused until " + until + ".";
+    } else {
+      $("pauseNote").textContent = "Checker is running.";
+    }
+    if (pause.blocked && pause.blocked.length) {
+      $("pauseNote").textContent += " Blocked apps: " + pause.blocked.join(", ") + ".";
+    }
 
     // The engine's Preset struct sends id/label/hint/keyEnv/local. This read `name`, a field it has never
     // sent, so every entry said "undefined" and every option's value was the string "undefined" — the panel
