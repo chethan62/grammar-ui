@@ -193,3 +193,50 @@ if (findingAt([], 3) !== null) throw new Error("no findings, no strip");
 if (findingAt(spans, undefined) !== null) throw new Error("no caret, no strip");
 if (findingAt([{ offset: 5, length: 0 }], 5) !== null) throw new Error("a zero-length finding has nothing to sit in");
 console.log("  app: the caret strip finds the finding under the caret, on its own offset and at its end");
+
+// The sentence a finding sits in is what the model is handed, because a rule that can only flag a sentence
+// cannot rewrite it. The boundaries are where this goes wrong — a lastIndexOf that found nothing returns
+// -1, and a separator list hardcoding 2 for a newline's width is one off for every line-broken sentence.
+const sStart = source.indexOf("function sentenceRange(");
+if (sStart < 0) throw new Error("sentenceRange() is gone from src/main.js");
+const sBody = source.slice(sStart, source.indexOf("\n}\n", sStart) + 3);
+const sentenceRange = new Function(`${sBody}\nreturn sentenceRange;`)();
+const pair = "The report was written by the team. It was reviewed.";   // 52 chars; sentence 1 ends at 35
+for (const [offset, want] of [
+  [0, [0, 35]],      // the opening word: nothing behind it, so the sentence starts at 0
+  [11, [0, 35]],     // the passive finding's own offset, mid-sentence
+  [34, [0, 35]],     // the first sentence's closing period
+  [36, [36, 52]],    // the second sentence, one past the space after the period
+  [39, [36, 52]],    // inside it, so the start is sentence 2 and not 0
+  [51, [36, 52]],    // its closing period, at the end of the draft
+]) {
+  const got = sentenceRange(pair, offset);
+  if (got[0] !== want[0] || got[1] !== want[1]) {
+    throw new Error(`sentenceRange(${offset}) = ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`);
+  }
+}
+if (JSON.stringify(sentenceRange("just words", 2)) !== "[0,10]") {
+  throw new Error("no punctuation: the whole draft is the sentence");
+}
+if (JSON.stringify(sentenceRange("one\ntwo", 5)) !== "[4,7]") {
+  throw new Error("a newline ends a sentence as much as a period does");
+}
+// And the row's action and harper's replacements are wired together: a finding harper offers a replacement
+// for gets its sentence fixer, one it can only see gets the model. Asserted as a contract on the source the
+// way the preset check is, because the alternative is a DOM — which is what the browser run covers, and CI
+// has no chromium for. Without this the two drift silently and a row offers "Fix sentence" for a finding
+// with nothing to fix, which is the bug this replaced: measured on `The report was written by the team.`,
+// where /v2/fix-sentence returned the text byte-identical.
+const rowStart = source.indexOf("function findingRow(");
+if (rowStart < 0) throw new Error("findingRow() is gone from src/main.js");
+const rowBody = source.slice(rowStart, source.indexOf("\n}\n", rowStart));
+if (!rowBody.includes("if (finding.alts.length)")) {
+  throw new Error("the row no longer branches on whether harper has a replacement for it");
+}
+if (!rowBody.includes('sentenceAction.textContent = "Rephrase"')) {
+  throw new Error("the row no longer offers the model the findings harper cannot fix");
+}
+if (!rowBody.includes('state.provider !== "none"')) {
+  throw new Error("the row offers Rephrase without checking that a model is configured");
+}
+console.log("  app: the row's action follows whether harper can fix the finding, model when it cannot");
