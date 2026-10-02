@@ -101,10 +101,24 @@ function findingRow(finding) {
     return button;
   });
 
-  const fix = document.createElement("button");
-  fix.className = "flat";
-  fix.textContent = "Fix sentence";
-  fix.addEventListener("click", () => fixSentence(finding));
+  // The row's sentence-level action, and the division of labour picks which one it is. A finding harper has
+  // a replacement for is one harper can act on: "Fix sentence" applies its first suggestion per finding
+  // across the whole sentence — a batch convenience, since the buttons above already do it one at a time.
+  // A finding with no replacements is one harper can only see. Measured: `The report was written by the
+  // team.` comes back PASSIVE_VOICE_SIMPLE with zero replacements and /v2/fix-sentence hands it back
+  // unchanged, so that row's "Fix sentence" did nothing when pressed. That is exactly the model's job —
+  // rules for what rules can express, the model for what they cannot, and no button when neither applies.
+  const sentenceAction = document.createElement("button");
+  sentenceAction.className = "flat";
+  if (finding.alts.length) {
+    sentenceAction.textContent = "Fix sentence";
+    sentenceAction.addEventListener("click", () => fixSentence(finding));
+  } else if (state.provider && state.provider !== "none") {
+    const [s0, s1] = sentenceRange($("draft").value, finding.offset);
+    sentenceAction.textContent = "Rephrase";
+    sentenceAction.title = "Ask the model to rewrite just this sentence";
+    sentenceAction.addEventListener("click", () => rephraseSentence(finding, s0, s1, div));
+  }
 
   // A word the checker itself should accept: every editor benefits, not just this window.
   //
@@ -113,7 +127,8 @@ function findingRow(finding) {
   // this window and teaching the checker it everywhere. The second is strictly the better fix and it is the
   // one that stayed; the ignore list is still in Settings, for words you want quiet without teaching.
   const word = /^[A-Za-z'’-]+$/.test(finding.before) ? finding.before : "";
-  const actions = [label, ...applies, fix];
+  const actions = [label, ...applies];
+  if (sentenceAction.textContent) actions.push(sentenceAction);
   // Rendered only when it applies, for the same reason: a disabled button on every row that is not a
   // misspelling is a control that teaches a reader nothing except that this panel is mostly unavailable.
   if (word && finding.rule === "MORFOLOGIK_RULE_EN_US") {
@@ -176,7 +191,7 @@ function debounceMs(lastMs) {
   return 1500;
 }
 
-const state = { findings: [], lastMs: null, timer: null, seq: 0, filter: "", partial: false, stats: null, undo: null };
+const state = { findings: [], lastMs: null, timer: null, seq: 0, filter: "", partial: false, stats: null, undo: null, provider: null };
 
 // What the list is showing. The report's counts double as a filter, so the list follows the last count
 // pressed. The caret strip does not — it is about where the cursor is, not about what is being browsed.
@@ -204,6 +219,21 @@ function drawFindings(text) {
 function findingAt(findings, caret) {
   if (!findings.length || typeof caret !== "number") return null;
   return findings.find((f) => f.length && caret >= f.offset && caret <= f.offset + f.length) || null;
+}
+
+// The sentence a finding sits in, as [start, stop). A sentence ends at terminal punctuation or a line
+// break, so the scan runs outward from the finding's own offset instead of splitting the whole draft and
+// looking the finding up in it — one pass, no index bookkeeping. `end.length`, not a hardcoded 2: the
+// separators are not all the same width, and a newline is one character.
+function sentenceRange(text, offset) {
+  const before = text.slice(0, offset);
+  let start = 0;
+  for (const end of [". ", "! ", "? ", ".\n", "!\n", "?\n", "\n"]) {
+    const at = before.lastIndexOf(end);
+    if (at >= 0) start = Math.max(start, at + end.length);
+  }
+  const at = text.slice(offset).search(/[.!?](\s|$)/);
+  return [start, at < 0 ? text.length : offset + at + 1];
 }
 
 function showAtCaret(text) {
@@ -418,6 +448,65 @@ async function fixSentence(finding) {
   }
 }
 
+// One candidate from the model, and what "Use this" does with it. The action differs by caller — the
+// Rewrite tab replaces the whole draft, a row's Rephrase replaces only the sentence it came from — so the
+// row is shared and the handler is passed in.
+function candidateRow(candidate, onUse) {
+  const div = document.createElement("div");
+  div.className = "row candidate";
+  const span = document.createElement("span");
+  span.textContent = candidate;                   // the model's words, never innerHTML
+  const use = document.createElement("button");
+  use.className = "flat";
+  use.textContent = "Use this";
+  use.addEventListener("click", () => onUse(candidate));
+  div.append(span, use);
+  return div;
+}
+
+// The model's half of the division: a sentence harper can flag but cannot rewrite. Only this sentence goes
+// to the model — sending the whole draft to fix one passive clause would rewrite text the reader was happy
+// with, which is the thing a rewrite tool must never do. The verdict stays harper's either way: whatever
+// comes back goes into the draft and is checked again, so the model proposes and the checker disposes.
+async function rephraseSentence(finding, start, stop, row) {
+  const area = $("draft");
+  const sentence = area.value.slice(start, stop).trim();
+  if (!sentence) return;
+  // A second press replaces the first answer rather than stacking a column of them under the row.
+  let box = row.nextElementSibling;
+  if (!box || !box.classList.contains("candidates")) {
+    box = document.createElement("div");
+    box.className = "candidates";
+    row.after(box);
+  }
+  const note = document.createElement("p");
+  note.className = "note";
+  note.textContent = "Asking the model…";
+  box.replaceChildren(note);
+  try {
+    const body = await call("/v2/rewrite", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: sentence, intent: "concise" }),
+    }, 30000);
+    const candidates = body.candidates || [];
+    if (!candidates.length) {
+      note.textContent = "The model returned nothing.";
+    } else {
+      box.replaceChildren(...candidates.map((chosen) => candidateRow(chosen, (text) => {
+        area.focus();
+        // setRangeText, so only this sentence moves and every other offset in the draft stays put.
+        area.setRangeText(text, start, stop, "select");
+        saveDraft();
+        check();
+      })));
+    }
+  } catch (error) {
+    note.textContent = error.name === "TimeoutError"
+      ? "The model did not answer within 30 s." : "Could not rephrase: " + error.message;
+    box.replaceChildren(note);
+  }
+}
+
 // ---- rewrite ---------------------------------------------------------------------------------------
 async function rewrite() {
   // One text box in the whole window: the one on the Check tab. Two boxes both asking for "the text" made
@@ -441,23 +530,12 @@ async function rewrite() {
       body: JSON.stringify({ text, intent: "concise" }),
     }, 30000);
     const candidates = body.candidates || [];
-    $("candidates").replaceChildren(...candidates.map((candidate) => {
-      const div = document.createElement("div");
-      div.className = "row candidate";
-      const span = document.createElement("span");
-      span.textContent = candidate;                 // the model's words, never innerHTML
-      const use = document.createElement("button");
-      use.className = "flat";
-      use.textContent = "Use this";
-      use.addEventListener("click", () => {
-        $("draft").value = candidate;
-        saveDraft();
-        showTab("check");
-        check();
-      });
-      div.append(span, use);
-      return div;
-    }));
+    $("candidates").replaceChildren(...candidates.map((candidate) => candidateRow(candidate, (text) => {
+      $("draft").value = text;
+      saveDraft();
+      showTab("check");
+      check();
+    })));
     $("rewriteState").textContent = candidates.length
       ? candidates.length + (candidates.length === 1 ? " version" : " versions") +
         " from " + body.model + (body.elapsedMs ? " in " + (body.elapsedMs / 1000).toFixed(1) + " s" : "")
@@ -505,6 +583,10 @@ async function load() {
     const [ignored, ai, langs, status, pause] = await Promise.all([
       call("/v2/ignore"), call("/v1/ai"), call("/v2/languages"), call("/status"), call("/v2/pause"),
     ]);
+    // The rows need to know whether a model is configured: a style finding harper cannot rewrite gets a
+    // "Rephrase" button when there is one and no button at all when there is not. "none" is the engine's
+    // own word for off, and a null provider means the engine never answered.
+    state.provider = ai.provider || null;
     const words = ignored.words || [];
     $("words").replaceChildren(...rows(words));
     $("wordsNote").textContent = words.length
