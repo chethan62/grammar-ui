@@ -197,15 +197,19 @@ function drawFindings(text) {
   report();
 }
 
-// The finding the caret is inside, shown beside the box being typed in. selectionStart is the same UTF-16
-// index the engine's offsets use, so this is a comparison and not a conversion.
+// The finding the caret or the selection is inside. selectionStart is the same UTF-16 index the engine's
+// offsets use, so this is a comparison and not a conversion — and both ends are inclusive, because clicking
+// a finding puts the selection exactly on its span, so the caret lands on the finding's own offset. A strict
+// comparison hid the strip in the one case it exists for: the row you just clicked.
+function findingAt(findings, caret) {
+  if (!findings.length || typeof caret !== "number") return null;
+  return findings.find((f) => f.length && caret >= f.offset && caret <= f.offset + f.length) || null;
+}
+
 function showAtCaret(text) {
   const box = $("atCaret");
-  const caret = $("draft").selectionStart;
-  const here = (typeof caret === "number")
-    ? state.findings.find((f) => f.length && caret > f.offset && caret <= f.offset + f.length)
-    : null;
-  if (!here || !text.trim()) { box.hidden = true; box.replaceChildren(); return; }
+  const here = text.trim() ? findingAt(state.findings, $("draft").selectionStart) : null;
+  if (!here) { box.hidden = true; box.replaceChildren(); return; }
   box.hidden = false;
   box.replaceChildren(findingRow(here));
 }
@@ -373,9 +377,10 @@ async function check() {
     });
     const n = showFindings(body, text);
     drawFindings(text);
-    $("announce").textContent = n
-      ? n + (n === 1 ? " finding" : " findings") + ". " + $("found").textContent
-      : "Nothing flagged.";
+    // The visible line beside the button already reads "2 findings". The announcement is there to say that a
+    // check ran, so it says that and lets the line carry the number, rather than reading "2 findings. 2
+    // findings" at whoever is listening.
+    $("announce").textContent = n ? "Checked. " + $("found").textContent : "Nothing flagged.";
     // How the text reads, from the engine's own counters — one more call, only on a deliberate check. The
     // whole payload reaches the report now, rather than the one line this used to keep from it.
     state.stats = await call("/v2/stats", {
