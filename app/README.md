@@ -5,11 +5,26 @@ Windows from this same source. Checking is live as you type; a finding can be ap
 whole text at once, with an undo; the report groups what the engine found by its own categories and says
 how the text reads.
 
-**No Rust of its own.** The engine sends `Access-Control-Allow-Origin: *`, so `src/main.js` calls it
+**No Rust of its own.** The engine sends `Access-Control-Allow-Origin: *`, so the window calls it
 directly with `fetch` — `/v2/check` and `/v2/stats` for the text, `/v2/rewrite` for a rephrasing,
 `/v2/fix-sentence` and `/v2/dictionary` and `/v2/ignore` for the actions on a finding, `/v1/ai` for the
 runner, `/v2/languages`, `/status` and `/v2/pause` on load. `src-tauri/src/lib.rs` exists only to set one
 environment variable (below) and start the window.
+
+**Six modules, imports one way.** `src/` is ES modules, not one file:
+
+    shell.js    leaf   the DOM shorthand, the live region, tab switching, the one HTTP call
+    model.js    leaf   the finding model — pure: no DOM, no fetch, which is why `check.mjs` imports it
+    rows.js            a finding becomes a row, and what a row's actions do
+    flow.js            check, live-check, the report, Fix all
+    panels.js          the Rewrite and Settings tabs
+    app.js             the wiring and the boot — the only module that knows all the others
+
+Nothing above imports anything below it back, so the leaves stay runnable on their own. The one place that
+needed a seam is a row's action ending in a re-check: `check()` lives in `flow.js`, which draws rows, so
+importing it from `rows.js` would close the loop. `rows.js` exports a `recheck` the wiring points at
+`check()` once, and it *throws* until wired — an action that appears to work and silently does not re-check
+is the failure worth designing against.
 
 **A finding's action follows what the engine can do with it.** harper offers replacements for spelling and
 the mechanical rules, so those rows get "Fix sentence" — its first suggestion per finding, across the whole

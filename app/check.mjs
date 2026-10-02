@@ -2,17 +2,22 @@
 // accepts a connection and never answers. `fetch` has no default timeout, so the guard is a single line
 // — and a single line is exactly what disappears in a refactor.
 //
-// `call()` is pulled out of src/main.js by brace matching, the way the old browser test pulled `esc()`
-// out of app.js: the app's own source runs here, not a copy of it that could drift.
+// The finding model is imported for real. src/model.js has no DOM and no fetch, so it runs here as itself
+// instead of as text pulled out of a larger file by brace matching — which is how this test used to reach
+// every one of these, and it meant a refactor could not be laid out differently without editing that
+// arithmetic.
+import { findingsFrom, applyAll, debounceMs, findingAt, sentenceRange } from "./src/model.js";
 
+// `call()` is the one thing still taken as source, and for two reasons: src/shell.js reads localStorage
+// when it loads, which node does not have, and this needs it pointed at a socket of the test's own
+// choosing. So its text is taken and handed a different ENGINE.
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:net";
 
-const source = await readFile(new URL("./src/main.js", import.meta.url), "utf8");
-const start = source.indexOf("async function call(");
-if (start < 0) throw new Error("call() is gone from src/main.js");
-const end = source.indexOf("\n}\n", start) + 3;
-const body = source.slice(start, end);
+const shell = await readFile(new URL("./src/shell.js", import.meta.url), "utf8");
+const start = shell.indexOf("export async function call(");
+if (start < 0) throw new Error("call() is gone from src/shell.js");
+const body = shell.slice(start, shell.indexOf("\n}\n", start) + 3).replace("export ", "");
 if (!body.includes("AbortSignal.timeout")) {
   throw new Error("call() no longer sets a timeout — a hung engine would freeze the window");
 }
@@ -42,11 +47,7 @@ try {
 }
 
 // --- the finding model ------------------------------------------------------------------------------
-// Same trick as call(): pull the app's own function out by brace matching rather than copying it.
-const mStart = source.indexOf("function findingsFrom(");
-if (mStart < 0) throw new Error("findingsFrom() is gone from src/main.js");
-const mBody = source.slice(mStart, source.indexOf("\n}\n", mStart) + 3);
-const findingsFrom = new Function(`${mBody}\nreturn findingsFrom;`)();
+// findingsFrom is imported at the top of this file, from src/model.js.
 
 // The emoji matters: it is two UTF-16 units, so an offset counted in code units still slices this string
 // directly. That is the engine's own guarantee, and the reason no offset arithmetic appears in the app.
@@ -96,13 +97,7 @@ console.log("  app: the finding model holds (UTF-16 offsets, empty replacements,
 
 // --- Fix all: every suggestion in one pass ----------------------------------------------------------
 // The offset arithmetic is the whole risk: applying left to right moves every offset still to be applied.
-// Same trick again, and the same reason as the top of this file: the interpolated text is this repo's own
-// src/main.js — the subject of the test — so there is no boundary being crossed and no other way to run a
-// function that only exists as source.
-const aStart = source.indexOf("function applyAll(");
-if (aStart < 0) throw new Error("applyAll() is gone from src/main.js");
-const aBody = source.slice(aStart, source.indexOf("\n}\n", aStart) + 3);
-const applyAll = new Function(`${aBody}\nreturn applyAll;`)();
+// applyAll is the real one from src/model.js, imported above — no copy, and no eval.
 
 const edit = (offset, length, after) => ({ offset, length, after, before: "x", rule: "", category: "Other" });
 const two = applyAll("teh wurd here", [edit(0, 3, "the"), edit(4, 4, "word")]);
@@ -129,11 +124,7 @@ console.log("  app: Fix all applies every suggestion in one pass, in either arri
 // --- the debounce bands -----------------------------------------------------------------------------
 // Ported from grammar_core.debounce_ms, whose docstring explains them. The boundaries are the whole risk
 // in a port (39 vs 40, 249 vs 250), so every one of them is asserted, and null is separately asserted
-// because "nothing measured yet" is not "fast".
-const dStart = source.indexOf("function debounceMs(");
-if (dStart < 0) throw new Error("debounceMs() is gone from src/main.js");
-const dBody = source.slice(dStart, source.indexOf("\n}\n", dStart) + 3);
-const debounceMs = new Function(`${dBody}\nreturn debounceMs;`)();
+// because "nothing measured yet" is not "fast". debounceMs comes from src/model.js.
 for (const [input, want] of [[null, 600], [0, 300], [39, 300], [40, 900], [249, 900], [250, 1500], [10000, 1500]]) {
   const got = debounceMs(input);
   if (got !== want) throw new Error(`debounceMs(${input}) = ${got}, expected ${want}`);
@@ -146,9 +137,11 @@ console.log("  app: the debounce bands match grammar_core.debounce_ms at every b
 // class this file exists for: a client written against an assumed response rather than a real one. This
 // checks the fields the panel reads against the fields the API actually sends, and skips (like every other
 // live precondition here) when no engine is running.
-const readsId = source.includes("option.value = p.id") && source.includes("p.label || p.id");
+// The picker lives in src/panels.js now, so the contract is checked against that file's text.
+const panels = await readFile(new URL("./src/panels.js", import.meta.url), "utf8");
+const readsId = panels.includes("option.value = p.id") && panels.includes("p.label || p.id");
 if (!readsId) throw new Error("load() no longer builds the provider picker from the preset's id/label");
-if (/\bp\.name\b/.test(source)) throw new Error("main.js reads p.name, which GET /v1/ai does not send");
+if (/\bp\.name\b/.test(panels)) throw new Error("panels.js reads p.name, which GET /v1/ai does not send");
 
 let live = "";
 try {
@@ -178,10 +171,7 @@ if (!live) {
 // lands *on* its offset, and the end of the span is a caret position too — both ends inclusive is the whole
 // rule. It was a strict comparison until a real browser run showed the strip refusing to appear for the one
 // finding it had just been asked about.
-const cStart = source.indexOf("function findingAt(");
-if (cStart < 0) throw new Error("findingAt() is gone from src/main.js");
-const cBody = source.slice(cStart, source.indexOf("\n}\n", cStart) + 3);
-const findingAt = new Function(`${cBody}\nreturn findingAt;`)();
+// findingAt is the real one from src/model.js, imported at the top.
 const spans = [{ offset: 0, length: 3 }, { offset: 10, length: 5 }];
 for (const [caret, want] of [[0, spans[0]], [2, spans[0]], [3, spans[0]],
                             [4, null], [10, spans[1]], [13, spans[1]], [15, spans[1]], [16, null]]) {
@@ -197,10 +187,7 @@ console.log("  app: the caret strip finds the finding under the caret, on its ow
 // The sentence a finding sits in is what the model is handed, because a rule that can only flag a sentence
 // cannot rewrite it. The boundaries are where this goes wrong — a lastIndexOf that found nothing returns
 // -1, and a separator list hardcoding 2 for a newline's width is one off for every line-broken sentence.
-const sStart = source.indexOf("function sentenceRange(");
-if (sStart < 0) throw new Error("sentenceRange() is gone from src/main.js");
-const sBody = source.slice(sStart, source.indexOf("\n}\n", sStart) + 3);
-const sentenceRange = new Function(`${sBody}\nreturn sentenceRange;`)();
+// sentenceRange is the real one from src/model.js, imported at the top.
 const pair = "The report was written by the team. It was reviewed.";   // 52 chars; sentence 1 ends at 35
 for (const [offset, want] of [
   [0, [0, 35]],      // the opening word: nothing behind it, so the sentence starts at 0
@@ -227,9 +214,10 @@ if (JSON.stringify(sentenceRange("one\ntwo", 5)) !== "[4,7]") {
 // has no chromium for. Without this the two drift silently and a row offers "Fix sentence" for a finding
 // with nothing to fix, which is the bug this replaced: measured on `The report was written by the team.`,
 // where /v2/fix-sentence returned the text byte-identical.
-const rowStart = source.indexOf("function findingRow(");
-if (rowStart < 0) throw new Error("findingRow() is gone from src/main.js");
-const rowBody = source.slice(rowStart, source.indexOf("\n}\n", rowStart));
+const rowsSrc = await readFile(new URL("./src/rows.js", import.meta.url), "utf8");
+const rowStart = rowsSrc.indexOf("export function findingRow(");
+if (rowStart < 0) throw new Error("findingRow() is gone from src/rows.js");
+const rowBody = rowsSrc.slice(rowStart, rowsSrc.indexOf("\n}\n", rowStart));
 if (!rowBody.includes("if (finding.alts.length)")) {
   throw new Error("the row no longer branches on whether harper has a replacement for it");
 }
@@ -240,3 +228,26 @@ if (!rowBody.includes('state.provider !== "none"')) {
   throw new Error("the row offers Rephrase without checking that a model is configured");
 }
 console.log("  app: the row's action follows whether harper can fix the finding, model when it cannot");
+
+// --- the layering seam ------------------------------------------------------------------------------
+// rows.js and flow.js are deliberately not a cycle: a row's actions reach check() through `recheck`, which
+// the wiring points at it once. The failure this guards is the quiet one — an unwired seam that does
+// nothing, so a row's action appears to work and silently does not re-check. So it must throw until wired.
+//
+// rows.js imports shell.js, which reads localStorage as it loads and node has none: the stub is what makes
+// the module importable here at all, and it is assigned before the dynamic import for that reason (a static
+// one would be hoisted above it).
+globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+// The namespace, not a destructured copy: `recheck` is an exported `let`, and destructuring reads its value
+// once, so a copy pins the stub. The namespace property is the live binding.
+const rows = await import("./src/rows.js");
+let unwired = null;
+try { rows.recheck(); } catch (error) { unwired = error; }
+if (!unwired) throw new Error("an unwired recheck() did nothing — a row's action would silently not re-check");
+// And once wired, the name rows.js calls is the wired one — that is what the export being a live binding
+// buys, and what makes the seam work without either module importing the other.
+let landed = 0;
+rows.setRecheck(() => { landed += 1; });
+rows.recheck();
+if (landed !== 1) throw new Error("setRecheck() did not take: the seam still holds the stub, so every row action would throw");
+console.log("  app: the recheck seam throws until wired, then is the wired check()");

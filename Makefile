@@ -25,8 +25,8 @@ test: check-app
 # purpose: make gives every line its own shell, so a skip that exits from one line and then probes on the
 # next announced itself and failed anyway — green here (the engine runs on this desk) and red in CI.
 check-app:
-	node --check app/src/main.js
-	@echo "  app: src/main.js parses"
+	@for m in shell model rows flow panels app; do node --check app/src/$$m.js || exit 1; done
+	@echo "  app: the six modules parse (shell, model, rows, flow, panels, app)"
 	node app/check.mjs
 	python3 app/check-palette.py
 	@api="$${GRAMMAR_API:-http://127.0.0.1:8875}"; \

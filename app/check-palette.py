@@ -50,15 +50,15 @@ for shade in (False, True):
         if got < 4.5:
             drift.append("%s %s on %s is %.2f, under 4.5" % ("dark" if shade else "light", fg, bg, got))
 
-# The debounce bands in src/main.js are a port of grammar_core.debounce_ms: same four answers, or the
+# The debounce bands in src/model.js are a port of grammar_core.debounce_ms: same four answers, or the
 # window waits a different length of time than the product it is part of does.
 py_bands = {i: core.debounce_ms(i) for i in (None, 0, 39, 40, 249, 250, 10000)}
-mjs = (HERE / "src/main.js").read_text()
+mjs = (HERE / "src/model.js").read_text()
 js_start = mjs.index("function debounceMs(")
 js_body = mjs[js_start:mjs.index("\n}\n", js_start)]
 for probe, want in py_bands.items():
     if ("return %d;" % want) not in js_body:
-        drift.append("debounce_ms(%s)=%s is missing from src/main.js" % (probe, want))
+        drift.append("debounce_ms(%s)=%s is missing from src/model.js" % (probe, want))
 
 # A stylesheet stops being extensible the moment a colour is written where a token belongs: the next theme
 # is then a hunt through every rule instead of one block. Every literal lives in a :root block, and this is
