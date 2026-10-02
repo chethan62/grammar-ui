@@ -74,8 +74,13 @@ function findingsFrom(body, text) {
 function findingRow(finding) {
   const div = document.createElement("div");
   div.className = "row finding";
-  const label = document.createElement("span");
+  // The label is a button: it is the row's own action — go to this text in the box — and a button is the
+  // only way to give that action to the keyboard as well as the mouse. Styled flat, it still reads as text.
+  const label = document.createElement("button");
+  label.className = "flat jump";
   label.textContent = finding.message + (finding.before ? " — " + finding.before : "");
+  label.title = "Go to this text";
+  label.addEventListener("click", () => jumpTo(finding));
   // textContent, never innerHTML: this is the user's own text coming back
 
   const applies = (finding.alts.length ? finding.alts : [null]).map((alt) => {
@@ -147,7 +152,20 @@ function findingRow(finding) {
   });
 
   div.append(label, ...applies, fix, addToDictionary, ignore);
+  // The whole row is the target for a mouse; the label carries it for the keyboard. A click that landed on
+  // an action button is left alone — this must never fire when someone meant Apply.
+  div.addEventListener("click", (event) => { if (!event.target.closest("button")) jumpTo(finding); });
   return div;
+}
+
+// Clicking a finding takes you to the text it is about, with native selection and native scrolling. The
+// engine's offsets are UTF-16 indices into this exact string, so there is nothing to convert — and the
+// caret strip then shows the same finding, because the caret has just been put inside it.
+function jumpTo(finding) {
+  const area = $("draft");
+  area.focus();
+  area.setSelectionRange(finding.offset, finding.offset + finding.length);
+  showAtCaret(area.value);
 }
 
 function saveDraft() {
@@ -296,14 +314,26 @@ async function liveCheck() {
     try {
       // Correctness only while typing: the style tier is what an explicit Check asks for, and the engine's
       // README makes the same distinction for editor clients ("never shown hints it did not ask for").
-      const body = await call("/v2/check", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(askFor(text, false)),
-      });
+      //
+      // Stats come along on this path too. They are the engine's own counters — a millisecond of work beside
+      // the check itself — and without them the insights keep describing the text you had a moment ago: a
+      // number that quietly stops matching what is in the box. Fetched in parallel and allowed to fail on
+      // its own, so a stats hiccup cannot take the findings down with it.
+      const [body, stats] = await Promise.all([
+        call("/v2/check", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(askFor(text, false)),
+        }),
+        call("/v2/stats", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        }).catch(() => null),
+      ]);
       // ponytail: the superseded request still runs. The engine answers in ~1 ms, so dropping its answer is
       // enough — reach for AbortController if a check ever gets expensive.
       if (mine !== state.seq) return;
       state.lastMs = performance.now() - began;
+      state.stats = stats;
       showFindings(body, text);
       drawFindings(text);
     } catch (error) {

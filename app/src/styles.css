@@ -139,6 +139,13 @@ details.more[open] summary { margin-bottom:var(--s1); }
            border:1px solid var(--border); border-radius:var(--radius); }
 .atcaret .finding { padding:0; }
 
+/* The finding's label is its own action — go to this text — so it is a button that reads as text, and the
+   whole row is the mouse target. No hover-revealed controls: a cue, never a control. */
+button.jump { height:auto; padding:0; text-align:left; background:transparent; border-color:transparent;
+              color:inherit; white-space:normal; }
+button.jump:hover:not(:disabled) { background:transparent; text-decoration:underline; }
+.finding { cursor:pointer; }
+
 /* One motion, one place to switch it off. Nothing here animates for effect — this is the hover fade — and
    a system asking for less motion gets none of it. */
 @media (prefers-reduced-motion: reduce) { * { transition:none !important; } }
