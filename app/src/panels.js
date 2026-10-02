@@ -1,7 +1,7 @@
 // The Rewrite tab and the Settings tab — the two panels that are mostly form: the provider picker and the
 // ignored-word list. Depends on shell, model and rows.
 
-import { $, call, say, showTab } from "./shell.js";
+import { $, call, say, showTab, engineUrl } from "./shell.js";
 import { state } from "./model.js";
 import { candidateRow, saveDraft, recheck } from "./rows.js";
 
@@ -172,8 +172,8 @@ export async function load() {
                       : "configured, not answering"));
   } catch (error) {
     say(error.name === "TimeoutError"
-        ? "The engine at " + ENGINE + " did not answer within 6 s."
-        : "No engine at " + ENGINE + " — " + error.message, true);
+        ? "The engine at " + engineUrl() + " did not answer within 6 s."
+        : "No engine at " + engineUrl() + " — " + error.message, true);
   }
 }
 

@@ -1,9 +1,13 @@
 // The window and the engine: the DOM shorthand, the live region, which tab is showing, and the one HTTP
 // call. A leaf — it imports nothing, so every other module can use it without forming a cycle.
 
-export const ENGINE = localStorage.getItem("grammar-api") || "http://127.0.0.1:8875";
-
 export const $ = (id) => document.getElementById(id);
+
+// Where the engine is, read when it is needed instead of when this module loads. Reading localStorage at
+// the top level made the file unimportable anywhere that has none — node, which is where the tests run —
+// and that is why `check.mjs` used to pull `call()` out of here as text and eval it. A function has no such
+// problem. It also means a changed address takes effect on the next call rather than at the next launch.
+export const engineUrl = () => localStorage.getItem("grammar-api") || "http://127.0.0.1:8875";
 
 export const TABS = ["check", "rewrite", "settings"];
 
@@ -11,7 +15,7 @@ export async function call(path, options, ms) {
   // `fetch` has no timeout. Six seconds covers everything the engine answers from its own engine; a model
   // needs longer, so /v2/rewrite passes 30s — measured 0.8-5s locally, and a timeout that fires during a
   // good answer would be worse than no rewrite at all.
-  const response = await fetch(ENGINE + path, { signal: AbortSignal.timeout(ms || 6000), ...options });
+  const response = await fetch(engineUrl() + path, { signal: AbortSignal.timeout(ms || 6000), ...options });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || (path + " answered " + response.status));
   return body;

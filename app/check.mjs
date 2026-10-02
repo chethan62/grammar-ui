@@ -2,25 +2,14 @@
 // accepts a connection and never answers. `fetch` has no default timeout, so the guard is a single line
 // — and a single line is exactly what disappears in a refactor.
 //
-// The finding model is imported for real. src/model.js has no DOM and no fetch, so it runs here as itself
-// instead of as text pulled out of a larger file by brace matching — which is how this test used to reach
-// every one of these, and it meant a refactor could not be laid out differently without editing that
-// arithmetic.
+// Everything the app exposes to a test is imported for real. src/model.js has no DOM and no fetch, and
+// src/shell.js reads its engine address lazily rather than at load, so both run here as themselves. They
+// used to be reached by slicing their text out of src/main.js and evaluating it, which broke whenever the
+// file was laid out differently — and after the file became six modules, that arithmetic had to be re-pointed
+// at each one. There is none of it left.
 import { findingsFrom, applyAll, debounceMs, findingAt, sentenceRange } from "./src/model.js";
-
-// `call()` is the one thing still taken as source, and for two reasons: src/shell.js reads localStorage
-// when it loads, which node does not have, and this needs it pointed at a socket of the test's own
-// choosing. So its text is taken and handed a different ENGINE.
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:net";
-
-const shell = await readFile(new URL("./src/shell.js", import.meta.url), "utf8");
-const start = shell.indexOf("export async function call(");
-if (start < 0) throw new Error("call() is gone from src/shell.js");
-const body = shell.slice(start, shell.indexOf("\n}\n", start) + 3).replace("export ", "");
-if (!body.includes("AbortSignal.timeout")) {
-  throw new Error("call() no longer sets a timeout — a hung engine would freeze the window");
-}
 
 // A socket that accepts and holds: the shape of the hang this defends against, and the same fixture the
 // manual check used (curl against it exits 28).
@@ -28,23 +17,28 @@ const hole = createServer((socket) => socket.on("data", () => {}));
 await new Promise((resolve) => hole.listen(0, "127.0.0.1", resolve));
 const port = hole.address().port;
 
-// `new Function` on interpolated text is a code-injection shape, and here the text is this repo's own
-// src/main.js — the subject of the test. Anyone who can change that file can already run anything this
-// app can; there is no boundary being crossed, and there is no way to run a function that only exists
-// as source without evaluating it.
-const call = new Function("ENGINE", `${body}\nreturn call;`)(`http://127.0.0.1:${port}`);
+// shell.js asks localStorage where the engine is, so pointing it at a port of this test's own choosing is
+// just setting the key the app already reads. The stub and the DOM below have to exist before the import,
+// which is why it is a dynamic one — a static import is hoisted above them.
+globalThis.localStorage = { getItem: (k) => (k === "grammar-api" ? `http://127.0.0.1:${port}` : null),
+                            setItem: () => {}, removeItem: () => {} };
+globalThis.document = { getElementById: () => ({ textContent: "", className: "" }) };
+const { call } = await import("./src/shell.js");
+
+// The deadline is the point: without a timeout `call()` never settles, so a plain `await` would hang this
+// suite rather than fail it — and a test that hangs reads as "still running", not as "the guard is gone".
 const began = Date.now();
-try {
-  await call("/v1/ai");
-  throw new Error("call() returned against a socket that never answers");
-} catch (error) {
-  const took = Date.now() - began;
-  if (error.name !== "TimeoutError") throw new Error(`expected TimeoutError, got ${error.name}: ${error.message}`);
-  if (took < 4000 || took > 9000) throw new Error(`gave up after ${took} ms rather than ~6000`);
-  console.log(`  app: gives up on a hung engine after ${took} ms (TimeoutError)`);
-} finally {
-  hole.close();
+const deadline = new Promise((resolve) => { const t = setTimeout(() => resolve("hung"), 12000); t.unref?.(); });
+const settled = await Promise.race([call("/v1/ai").then(() => "returned", (error) => error), deadline]);
+if (settled === "hung") {
+  throw new Error("call() never gave up on a socket that accepts and stays silent — the timeout is gone (waited 12 s)");
 }
+if (settled === "returned") throw new Error("call() returned against a socket that never answers");
+if (settled.name !== "TimeoutError") throw new Error(`expected TimeoutError, got ${settled.name}: ${settled.message}`);
+const took = Date.now() - began;
+if (took < 4000 || took > 9000) throw new Error(`gave up after ${took} ms rather than ~6000`);
+hole.close();
+console.log(`  app: gives up on a hung engine after ${took} ms (TimeoutError)`);
 
 // --- the finding model ------------------------------------------------------------------------------
 // findingsFrom is imported at the top of this file, from src/model.js.
@@ -251,3 +245,48 @@ rows.setRecheck(() => { landed += 1; });
 rows.recheck();
 if (landed !== 1) throw new Error("setRecheck() did not take: the seam still holds the stub, so every row action would throw");
 console.log("  app: the recheck seam throws until wired, then is the wired check()");
+
+// --- the window with no engine ----------------------------------------------------------------------
+// The failure paths, which nothing above this line ever ran: every harness in this file works against a
+// live engine or a socket of its own, so the branch that reports a *dead* one was never executed. That is
+// exactly where the last regression hid — panels.js used a name it never imported, so with the engine down
+// Settings threw `ReferenceError: ENGINE is not defined` instead of saying "No engine at …", which is the
+// one thing that branch exists to say. A green gate did not notice, because the gate never got there.
+//
+// So: run the module with a fetch that always fails and require that it reports the engine rather than
+// throwing. It has to be last, because it takes over globalThis.fetch.
+{
+  const recorded = {};
+  const noop = () => {};
+  const el = (id) => {
+    const b = { dataset: {}, selectedOptions: [], classList: { add: noop, remove: noop },
+      addEventListener: noop, setAttribute: noop, append: noop, appendChild: noop, replaceChildren: noop,
+      focus: noop, closest: () => null, value: "", hidden: false, disabled: false, className: "", children: [] };
+    Object.defineProperty(b, "textContent", { get: () => recorded[id], set: (v) => { recorded[id] = v; } });
+    b.parentElement = b;
+    return b;
+  };
+  const cache = new Map();
+  cache.set("draft", Object.assign(el("draft"), { value: "a draft, so the check reaches the engine" }));
+  globalThis.document = { getElementById: (id) => cache.get(id) || (cache.set(id, el(id)), cache.get(id)),
+                          createElement: () => el("x"), addEventListener: noop, activeElement: null };
+  globalThis.window = { addEventListener: noop };
+  globalThis.fetch = () => Promise.reject(new TypeError("fetch failed"));
+  const { load } = await import("./src/panels.js");
+  await load();                                  // must resolve and report, not throw
+  if (!/^No engine at http:\/\//.test(recorded.status || "")) {
+    throw new Error(`with the engine down the footer said ${JSON.stringify(recorded.status)} — it must name the engine it could not reach`);
+  }
+  if (recorded.state !== "not answering") {
+    throw new Error(`with the engine down the status dot said ${JSON.stringify(recorded.state)}`);
+  }
+  // The other module that has a failure branch: a check that cannot reach the engine reports it in the
+  // count line and stays quiet otherwise. Asserted on that text rather than on "it did not throw", so this
+  // proves the branch ran instead of assuming it.
+  const { check } = await import("./src/flow.js");
+  await check();
+  if (!/^Could not check: |^The engine did not answer/.test(recorded.found || "")) {
+    throw new Error(`with the engine down a check reported ${JSON.stringify(recorded.found)} — the failure branch did not run`);
+  }
+  console.log("  app: with no engine the window says so instead of throwing");
+}
