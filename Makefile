@@ -82,3 +82,22 @@ uninstall:
 	rm -f $(ICONDIR)/grammar-ui.svg
 	-update-desktop-database $(APPDIR) 2>/dev/null
 	-systemctl --user daemon-reload
+
+# The window itself, separate from the clients above because it is a different kind of thing: one binary
+# built by Tauri from app/ (which embeds its own assets, so there is nothing to copy beside it) and one menu
+# entry. Kept out of `install` on purpose — that one is Python and needs no toolchain, while this needs a
+# Rust build that a fresh checkout will not have.
+APPBIN = app/src-tauri/target/release/grammar
+
+install-app:
+	@test -x $(APPBIN) || { echo "not built yet — run: cd app && npm run tauri build -- --no-bundle"; exit 1; }
+	install -d $(BINDIR) $(APPDIR)
+	install -m755 $(APPBIN) $(BINDIR)/grammar
+	sed 's|@BINDIR@|$(BINDIR)|' deployments/grammar.desktop > $(APPDIR)/grammar.desktop
+	chmod 644 $(APPDIR)/grammar.desktop
+	-update-desktop-database $(APPDIR) 2>/dev/null
+	@echo "Installed $(BINDIR)/grammar — it appears in the menu as \"Grammar\"."
+
+uninstall-app:
+	rm -f $(BINDIR)/grammar $(APPDIR)/grammar.desktop
+	-update-desktop-database $(APPDIR) 2>/dev/null
