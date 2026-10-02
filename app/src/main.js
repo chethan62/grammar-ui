@@ -83,11 +83,12 @@ function findingRow(finding) {
   label.addEventListener("click", () => jumpTo(finding));
   // textContent, never innerHTML: this is the user's own text coming back
 
-  const applies = (finding.alts.length ? finding.alts : [null]).map((alt) => {
+  // Nothing to apply means no button at all. A disabled "No suggestion" is the same lesson in clutter: it
+  // is on every finding the engine could not offer a replacement for, which is most of the style findings.
+  const applies = finding.alts.map((alt) => {
     const button = document.createElement("button");
     button.className = "flat";
-    button.textContent = alt ? "Use " + alt : "No suggestion";
-    button.disabled = !alt;
+    button.textContent = "Use " + alt;
     button.addEventListener("click", async () => {
       const area = $("draft");
       area.focus();
@@ -106,52 +107,41 @@ function findingRow(finding) {
   fix.addEventListener("click", () => fixSentence(finding));
 
   // A word the checker itself should accept: every editor benefits, not just this window.
+  //
+  // One word action, not two. "Ignore this word" and "Add to dictionary" both made a word stop being
+  // flagged, so a row offering both was asking the reader to know the difference between quieting a word in
+  // this window and teaching the checker it everywhere. The second is strictly the better fix and it is the
+  // one that stayed; the ignore list is still in Settings, for words you want quiet without teaching.
   const word = /^[A-Za-z'’-]+$/.test(finding.before) ? finding.before : "";
-  const addToDictionary = document.createElement("button");
-  addToDictionary.className = "flat";
-  addToDictionary.textContent = "Add to dictionary";
-  addToDictionary.disabled = !word || finding.rule !== "MORFOLOGIK_RULE_EN_US";
-  addToDictionary.addEventListener("click", async () => {
-    addToDictionary.disabled = true;
-    try {
-      const answer = await call("/v2/dictionary", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ word }),
-      });
-      await check();
-      // The endpoint checks its own effect and says so, so this reports what happened rather than what
-      // was attempted: a word written but not picked up is a different outcome from one that took.
-      say(answer.accepted
-        ? "The checker now accepts " + word + "."
-        : "Saved " + word + ", but the checker still flags it — see " + answer.path, !answer.accepted);
-    } catch (error) {
-      addToDictionary.disabled = false;
-      say("Could not add " + word + ": " + error.message, true);
-    }
-  });
+  const actions = [label, ...applies, fix];
+  // Rendered only when it applies, for the same reason: a disabled button on every row that is not a
+  // misspelling is a control that teaches a reader nothing except that this panel is mostly unavailable.
+  if (word && finding.rule === "MORFOLOGIK_RULE_EN_US") {
+    const addToDictionary = document.createElement("button");
+    addToDictionary.className = "flat";
+    addToDictionary.textContent = "Add to dictionary";
+    addToDictionary.addEventListener("click", async () => {
+      addToDictionary.disabled = true;
+      try {
+        const answer = await call("/v2/dictionary", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ word }),
+        });
+        await check();
+        // The endpoint checks its own effect and says so, so this reports what happened rather than what
+        // was attempted: a word written but not picked up is a different outcome from one that took.
+        say(answer.accepted
+          ? "The checker now accepts " + word + "."
+          : "Saved " + word + ", but the checker still flags it — see " + answer.path, !answer.accepted);
+      } catch (error) {
+        addToDictionary.disabled = false;
+        say("Could not add " + word + ": " + error.message, true);
+      }
+    });
+    actions.push(addToDictionary);
+  }
 
-  const ignore = document.createElement("button");
-  ignore.className = "flat";
-  ignore.textContent = "Ignore this word";
-  // Only a single misspelled word, the same rule the host has always used (grammar_core.finding_word): a
-  // grammar rule that spans one word would otherwise hide that word in every later sentence.
-  ignore.disabled = !word || finding.rule !== "MORFOLOGIK_RULE_EN_US";
-  ignore.addEventListener("click", async () => {
-    ignore.disabled = true;
-    try {
-      await call("/v2/ignore", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ word: finding.before }),
-      });
-      await check();
-      say("Stopped reporting " + finding.before + ".");
-    } catch (error) {
-      ignore.disabled = false;
-      say("Could not ignore " + finding.before + ": " + error.message, true);
-    }
-  });
-
-  div.append(label, ...applies, fix, addToDictionary, ignore);
+  div.append(...actions);
   // The whole row is the target for a mouse; the label carries it for the keyboard. A click that landed on
   // an action button is left alone — this must never fire when someone meant Apply.
   div.addEventListener("click", (event) => { if (!event.target.closest("button")) jumpTo(finding); });
@@ -251,7 +241,9 @@ function report() {
   box.replaceChildren();
   const counts = new Map();
   for (const f of state.findings) counts.set(f.category, (counts.get(f.category) || 0) + 1);
-  if (state.findings.length) {
+  // A filter with one choice is not a filter, and a chip repeating the count beside it is noise. One
+  // category, no chips.
+  if (counts.size > 1) {
     const chips = document.createElement("div");
     chips.className = "chips";
     for (const [category, n] of [...counts].sort((a, b) => b[1] - a[1])) {
@@ -268,22 +260,35 @@ function report() {
     }
     box.append(chips);
   }
-  // How the text reads, from the engine's own counters. This is the tier these apps sell as writing
-  // insights, and the engine has answered all of it since /v2/stats existed — the window kept one line.
+  // Four numbers, then the rest behind a summary. Eight of them in one line is a wall a reader skips; the
+  // reading ease and its grade are what anyone acts on, and the others are there for when you want them.
   const line = document.createElement("p");
   line.className = "note";
   line.textContent = stats.words ? [
     stats.words + " words",
     stats.sentences + (stats.sentences === 1 ? " sentence" : " sentences"),
-    "variety " + Math.round((stats.uniqueRatio || 0) * 100) + "%",
-    "longest sentence " + stats.longestSentenceWords + " words",
     "reading ease " + stats.fleschReadingEase + " (" + stats.grade + ")",
-    "Flesch–Kincaid grade " + stats.fleschKincaidGrade,
-    "Gunning Fog " + stats.gunningFog,
     stats.readingTime,
   ].join(" · ") : "";
   line.hidden = !stats.words;
   box.append(line);
+  if (stats.words) {
+    const more = document.createElement("details");
+    more.className = "more";
+    const summary = document.createElement("summary");
+    summary.textContent = "More about this text";
+    const detail = document.createElement("p");
+    detail.className = "note";
+    detail.textContent = [
+      "vocabulary variety " + Math.round((stats.uniqueRatio || 0) * 100) + "%",
+      "average sentence " + stats.meanSentenceWords + " words",
+      "longest sentence " + stats.longestSentenceWords + " words",
+      "Flesch–Kincaid grade " + stats.fleschKincaidGrade,
+      "Gunning Fog " + stats.gunningFog,
+    ].join(" · ");
+    more.append(summary, detail);
+    box.append(more);
+  }
   box.hidden = !state.findings.length && !stats.words;
 }
 
@@ -410,25 +415,25 @@ async function fixSentence(finding) {
 
 // ---- rewrite ---------------------------------------------------------------------------------------
 async function rewrite() {
-  const text = $("source").value;
-  const intent = $("intent").value.trim();
+  // One text box in the whole window: the one on the Check tab. Two boxes both asking for "the text" made
+  // the reader decide which one counted — and a chosen version already replaced the draft, so the coupling
+  // was there anyway. This stops pretending otherwise.
+  const text = $("draft").value;
   $("candidates").replaceChildren();
-  if (!text.trim()) { $("rewriteState").textContent = "Nothing to rewrite yet."; return; }
-  if (!/^[a-z]{1,20}$/.test(intent)) {
-    // The engine answers 400 "invalid 'intent': one lower-case word, up to 20 letters" and no UI would have
-    // told you; saying it here costs one line and saves a round trip.
-    $("rewriteState").textContent = "Intent must be one lower-case word, up to 20 letters.";
-    $("intent").focus();
+  if (!text.trim()) {
+    $("rewriteState").textContent = "Nothing to rewrite yet — put the text on the Check tab.";
     return;
   }
   $("rewrite").disabled = true;
   $("rewriteState").textContent = "Asking the model…";
   try {
-    const payload = { text, intent };
-    if ($("tone").value.trim()) payload.tone = $("tone").value.trim();
+    // concise, and no tone. The engine's own note on this is that asking a small model for a tone makes it
+    // add words rather than fix them, and that concise is the one hint worth setting — so the two fields
+    // that used to be here were both a rule to learn and a worse result. A field whose honest default is
+    // "leave it empty" is a field nobody should have to understand.
     const body = await call("/v2/rewrite", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ text, intent: "concise" }),
     }, 30000);
     const candidates = body.candidates || [];
     $("candidates").replaceChildren(...candidates.map((candidate) => {
@@ -438,7 +443,7 @@ async function rewrite() {
       span.textContent = candidate;                 // the model's words, never innerHTML
       const use = document.createElement("button");
       use.className = "flat";
-      use.textContent = "Check this";
+      use.textContent = "Use this";
       use.addEventListener("click", () => {
         $("draft").value = candidate;
         saveDraft();

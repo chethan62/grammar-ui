@@ -118,7 +118,11 @@ textarea { font:inherit; font-size:var(--t-body); color:var(--text); background:
 /* The label gets a floor and the actions wrap under it. Four buttons on a sentence finding used to crush
    the message to one character per line: flex-basis alone does not stop that, because a shrinkable item
    shrinks past it, and min-width is what holds the line. */
-.finding span, .candidate span { flex:1 1 22ch; min-width:22ch; overflow-wrap:anywhere; }
+/* The label carries this whether it is a span or a button — keying it on the tag is what let every long
+   message be clipped to one line the moment the label became a button. min-width, not flex-basis: a
+   shrinkable item shrinks past its basis, and the floor is what stops a label being squeezed to one
+   character per line. */
+.finding .jump, .finding span, .candidate span { flex:1 1 22ch; min-width:22ch; overflow-wrap:anywhere; }
 .finding button, .candidate button { flex:0 0 auto; }
 .finding + .finding, .candidate + .candidate { border-top:1px solid var(--border); }
 #candidates { margin-top:var(--s2); }
