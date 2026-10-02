@@ -109,7 +109,10 @@
     <div class="status" id="status" role="status" aria-live="polite"></div>
   </div>
 
-  <!-- No module loader: the script imports nothing, so the same three files open over file:// too. -->
-  <script defer src="main.js"></script>
+  <!-- Six modules, one-way imports, no cycle: see app.js for the wiring and rows.js for the one seam. This
+       does mean index.html no longer opens straight off the disk — a module fetch from a `file://` origin is
+       blocked — and that affordance was only ever for reading the markup. The window is served by Tauri and
+       the checks run in node; neither goes through file://. -->
+  <script type="module" src="app.js"></script>
 </body>
 </html>
