@@ -54,9 +54,14 @@ function findingsFrom(body, text) {
       .map((r) => (typeof r === "string" ? r : (r && r.value)))
       .filter((v) => v);
     const after = alts.length ? alts[0] : null;
+    // The category is what the report groups by. The engine labels every match (STYLE, GRAMMAR, MISC…), so
+    // a style report is a grouping of the findings already on screen — not another request, and not a rule
+    // list of our own that could drift from the engine's.
+    const rule = match.rule || {};
     return {
       message: match.message || "Finding",
-      rule: (match.rule && match.rule.id) || "",
+      rule: rule.id || "",
+      category: (rule.category && (rule.category.name || rule.category.id)) || "Other",
       before: text.slice(offset, offset + length),
       after,
       alts,
@@ -163,26 +168,128 @@ function debounceMs(lastMs) {
   return 1500;
 }
 
-const state = { findings: [], lastMs: null, timer: null, seq: 0 };
+const state = { findings: [], lastMs: null, timer: null, seq: 0, filter: "", partial: false, stats: null, undo: null };
+
+// What the list is showing. The report's counts double as a filter, so the list follows the last count
+// pressed. The caret strip does not — it is about where the cursor is, not about what is being browsed.
+function drawn() {
+  return state.filter ? state.findings.filter((f) => f.category === state.filter) : state.findings;
+}
 
 function drawFindings(text) {
-  $("findings").replaceChildren(...state.findings.map((f) => findingRow(f, text)));
+  const shown = drawn();
+  $("findings").replaceChildren(...shown.map(findingRow));
+  const partial = state.partial ? " (partial)" : "";
+  $("found").textContent = state.findings.length
+    ? (state.filter
+       ? shown.length + " of " + state.findings.length + " — " + state.filter
+       : state.findings.length + (state.findings.length === 1 ? " finding" : " findings") + partial)
+    : "Nothing flagged" + partial;
+  showAtCaret(text);
+  report();
+}
+
+// The finding the caret is inside, shown beside the box being typed in. selectionStart is the same UTF-16
+// index the engine's offsets use, so this is a comparison and not a conversion.
+function showAtCaret(text) {
+  const box = $("atCaret");
+  const caret = $("draft").selectionStart;
+  const here = (typeof caret === "number")
+    ? state.findings.find((f) => f.length && caret > f.offset && caret <= f.offset + f.length)
+    : null;
+  if (!here || !text.trim()) { box.hidden = true; box.replaceChildren(); return; }
+  box.hidden = false;
+  box.replaceChildren(findingRow(here));
 }
 
 function showFindings(body, text) {
   state.findings = findingsFrom(body, text);
-  const partial = !!(body.warnings && body.warnings.incompleteResults);
-  const n = state.findings.length;
-  $("found").textContent = n
-    ? n + (n === 1 ? " finding" : " findings") + (partial ? " (partial)" : "")
-    : "Nothing flagged" + (partial ? " — but the check was partial" : "");
-  return n;
+  state.partial = !!(body.warnings && body.warnings.incompleteResults);
+  return state.findings.length;
+}
+
+// ---- the report, and Fix all: what the paid tiers of the apps in this market sell -------------------
+// Every suggestion in one pass, right to left so an edit cannot move the offsets of the edits still to
+// come. Two findings can overlap — a phrase rule whose span contains a misspelled word — and writing both
+// over the same characters would duplicate or drop text, so the first one kept wins and the other is
+// skipped. A finding with no suggestion is not a failure: there is simply nothing to apply for it.
+function applyAll(text, findings) {
+  const edits = findings.filter((f) => f.after && f.length > 0).sort((a, b) => b.offset - a.offset);
+  const used = [];
+  let out = text;
+  let applied = 0;
+  for (const f of edits) {
+    if (used.some((u) => f.offset < u.offset + u.length && u.offset < f.offset + f.length)) continue;
+    used.push(f);
+    out = out.slice(0, f.offset) + f.after + out.slice(f.offset + f.length);
+    applied += 1;
+  }
+  return { text: out, applied, skipped: edits.length - applied };
+}
+
+function report() {
+  const box = $("report");
+  const stats = state.stats || {};
+  box.replaceChildren();
+  const counts = new Map();
+  for (const f of state.findings) counts.set(f.category, (counts.get(f.category) || 0) + 1);
+  if (state.findings.length) {
+    const chips = document.createElement("div");
+    chips.className = "chips";
+    for (const [category, n] of [...counts].sort((a, b) => b[1] - a[1])) {
+      const chip = document.createElement("button");
+      chip.className = "chip";
+      chip.textContent = category + " " + n;
+      chip.setAttribute("aria-pressed", String(state.filter === category));
+      chip.title = (state.filter === category ? "Stop showing only " : "Show only ") + category;
+      chip.addEventListener("click", () => {
+        state.filter = state.filter === category ? "" : category;   // one click filters, the next clears
+        drawFindings($("draft").value);
+      });
+      chips.append(chip);
+    }
+    box.append(chips);
+  }
+  // How the text reads, from the engine's own counters. This is the tier these apps sell as writing
+  // insights, and the engine has answered all of it since /v2/stats existed — the window kept one line.
+  const line = document.createElement("p");
+  line.className = "note";
+  line.textContent = stats.words ? [
+    stats.words + " words",
+    stats.sentences + (stats.sentences === 1 ? " sentence" : " sentences"),
+    "variety " + Math.round((stats.uniqueRatio || 0) * 100) + "%",
+    "longest sentence " + stats.longestSentenceWords + " words",
+    "reading ease " + stats.fleschReadingEase + " (" + stats.grade + ")",
+    "Flesch–Kincaid grade " + stats.fleschKincaidGrade,
+    "Gunning Fog " + stats.gunningFog,
+    stats.readingTime,
+  ].join(" · ") : "";
+  line.hidden = !stats.words;
+  box.append(line);
+  box.hidden = !state.findings.length && !stats.words;
+}
+
+// Fix all, and the one thing that makes it safe to press: the text before the edit is kept, so Undo is one
+// click and there is nothing to confirm. Offsets only mean anything against the text they were measured
+// on, so this is one pass over the current findings, not a loop that re-checks between edits.
+async function fixAll() {
+  const area = $("draft");
+  const before = area.value;
+  const { text, applied, skipped } = applyAll(before, state.findings);
+  if (!applied) { $("announce").textContent = "No finding here carries a suggestion."; return; }
+  area.value = text;
+  state.undo = before;
+  $("undo").hidden = false;
+  saveDraft();
+  await check();
+  $("announce").textContent = applied + (applied === 1 ? " fix applied" : " fixes applied") +
+    (skipped ? ", " + skipped + " skipped as overlapping" : "") + ". Undo is available.";
 }
 
 async function liveCheck() {
   const text = $("draft").value;
   clearTimeout(state.timer);
-  if (!text.trim()) { state.findings = []; drawFindings(text); $("found").textContent = ""; return; }
+  if (!text.trim()) { state.findings = []; state.stats = null; drawFindings(text); return; }
   state.timer = setTimeout(async () => {
     const mine = ++state.seq;
     const began = performance.now();
@@ -215,11 +322,10 @@ function askFor(text, full) {
 async function check() {
   const text = $("draft").value;
   clearTimeout(state.timer);                                         // a deliberate check outranks a pending one
-  $("summary").textContent = "";
+  state.stats = null;
   if (!text.trim()) {
     state.findings = [];
     drawFindings(text);
-    $("found").textContent = "";
     $("announce").textContent = "Nothing to check yet.";
     return;
   }
@@ -235,15 +341,13 @@ async function check() {
     $("announce").textContent = n
       ? n + (n === 1 ? " finding" : " findings") + ". " + $("found").textContent
       : "Nothing flagged.";
-    // How the text reads, from the engine's own counters — one more call, only on a deliberate check.
-    const stats = await call("/v2/stats", {
+    // How the text reads, from the engine's own counters — one more call, only on a deliberate check. The
+    // whole payload reaches the report now, rather than the one line this used to keep from it.
+    state.stats = await call("/v2/stats", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
     });
-    $("summary").textContent = stats.words
-      ? stats.words + " words · " + stats.sentences + (stats.sentences === 1 ? " sentence" : " sentences") +
-        " · reading ease " + stats.fleschReadingEase + " (" + stats.grade + ") · " + stats.readingTime
-      : "";
+    report();
   } catch (error) {
     $("found").textContent = error.name === "TimeoutError"
       ? "The engine did not answer within 6 s." : "Could not check: " + error.message;
@@ -458,8 +562,27 @@ async function addWord() {
 $("add").addEventListener("click", addWord);
 $("newWord").addEventListener("keydown", (event) => { if (event.key === "Enter") addWord(); });
 
+// The caret moves without an edit, so the strip follows it: selectionchange covers the keyboard, the
+// mouse and a click into the box.
+document.addEventListener("selectionchange", () => {
+  if (document.activeElement === $("draft")) showAtCaret($("draft").value);
+});
 $("check").addEventListener("click", check);
-$("draft").addEventListener("input", () => { saveDraft(); liveCheck(); });
+$("fixall").addEventListener("click", fixAll);
+$("undo").addEventListener("click", async () => {
+  if (state.undo === null) return;
+  $("draft").value = state.undo;                                     // the text exactly as it was
+  state.undo = null;
+  $("undo").hidden = true;
+  saveDraft();
+  await check();
+  $("announce").textContent = "Undone.";
+});
+$("draft").addEventListener("input", () => {
+  // An edit after Fix all makes the kept copy the wrong thing to go back to, so Undo goes with it.
+  state.undo = null; $("undo").hidden = true;
+  saveDraft(); liveCheck();
+});
 // Ctrl+Enter checks, matching the add field that submits on Enter — and it must not swallow plain Enter,
 // which inserts a newline in a textarea.
 $("draft").addEventListener("keydown", (event) => {

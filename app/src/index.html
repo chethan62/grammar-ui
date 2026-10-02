@@ -23,13 +23,21 @@
     <textarea id="draft" rows="5" spellcheck="false" placeholder="Paste or type the text to check"></textarea>
     <div class="add">
       <button class="primary" id="check">Check</button>
+      <button id="fixall">Fix all</button>
+      <button id="undo" hidden>Undo</button>
       <!-- #found is updated on every debounced keystroke, so it must not be a live region: a screen reader
            would narrate "3 findings" over and over while someone types. The announcement goes to #announce,
            which only the explicit Check writes. -->
       <span class="status" id="found"></span>
       <span class="sr-only" role="status" aria-live="polite" id="announce"></span>
     </div>
-    <p class="note" id="summary"></p>
+    <!-- The report: the findings grouped by the engine's own category labels, each count a filter, and how
+         the text reads. Every number comes from the check that just ran — no second request. -->
+    <div id="report" class="report" hidden></div>
+    <!-- Where you are typing: the finding whose text covers the caret, with the same actions its row has.
+         Not a floating card at the caret — a textarea cannot place one without a mirror element — but the
+         suggestion is beside the box being typed in rather than only in the list below it. -->
+    <div id="atCaret" class="atcaret" hidden></div>
     <div id="findings"></div>
   </section>
 
@@ -61,25 +69,29 @@
     <hr class="rule">
 
     <h2 class="caption">AI settings</h2>
-    <p class="note muted">Which model rephrases your sentences. Checking works either way — this affects
-       Rewrite only, and the choice survives a restart.</p>
+    <details class="more"><summary>The model Rewrite uses</summary>
+      <p class="note muted">Checking your writing works either way — this affects Rewrite only, and the
+         choice survives a restart.</p>
+    </details>
 
     <label class="caption" for="provider">Runner</label>
     <div class="field"><select id="provider"></select></div>
     <p class="note" id="providerNote"></p>
 
-    <label class="caption" for="url">Address</label>
-    <div class="field"><input id="url" spellcheck="false"></div>
-    <p class="note">The base URL of the server, no /v1 needed at the end.</p>
+    <details class="more"><summary>Advanced: the server address</summary>
+      <label class="caption" for="url">Address</label>
+      <div class="field"><input id="url" spellcheck="false"></div>
+      <p class="note">The base URL of the server, no /v1 needed at the end.</p>
+    </details>
 
     <label class="caption" for="model">Model</label>
     <div class="field"><input id="model" list="models" spellcheck="false"></div>
     <datalist id="models"></datalist>
-    <p class="note" id="modelNote">What this server reports, or type any model name.</p>
+    <p class="note" id="modelNote" hidden></p>
 
     <label class="caption" for="language">Dialect</label>
     <div class="field"><select id="language"></select></div>
-    <p class="note" id="languageNote">The dialect the checker reads your text as.</p>
+    <p class="note" id="languageNote" hidden></p>
 
     <div class="add"><button class="primary" id="save">Save</button>
       <span class="status" id="saveState" role="status" aria-live="polite"></span></div>
