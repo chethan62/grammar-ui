@@ -60,33 +60,25 @@ install:
 	install -m755 desktop/grammar-lookup.py $(BINDIR)/grammar-lookup
 	install -m755 desktop/grammar-watch.py $(BINDIR)/grammar-watch
 	install -m755 desktop/grammar-doctor.py $(BINDIR)/grammar-doctor
-	install -m755 desktop/grammar-action.py $(BINDIR)/grammar-action
 	install -m755 desktop/grammar-pause.py $(BINDIR)/grammar-pause
 	install -m644 desktop/grammar_core.py $(BINDIR)/grammar_core.py
 	sed 's|@BINDIR@|$(BINDIR)|' deployments/grammar-lookup.desktop > $(APPDIR)/grammar-lookup.desktop
-	sed 's|@BINDIR@|$(BINDIR)|' deployments/grammar-accept.desktop > $(APPDIR)/grammar-accept.desktop
-	sed 's|@BINDIR@|$(BINDIR)|' deployments/grammar-dismiss.desktop > $(APPDIR)/grammar-dismiss.desktop
-	chmod 644 $(APPDIR)/grammar-lookup.desktop $(APPDIR)/grammar-accept.desktop \
-	          $(APPDIR)/grammar-dismiss.desktop
+	chmod 644 $(APPDIR)/grammar-lookup.desktop
 	-update-desktop-database $(APPDIR) 2>/dev/null
 	-systemctl --user daemon-reload
-	@echo "Installed $(BINDIR)/grammar-{lookup,watch,action} and the watcher unit."
+	@echo "Installed the clients in $(BINDIR), and the watcher unit with them."
 	@echo "  systemctl --user enable --now grammar-watch   # suggestions as you type, anywhere"
 	@echo "Shortcuts are yours to choose (System Settings -> Shortcuts), and binding them is a"
 	@echo "manual step: this Makefile writes no keys, whatever an older README said. Suggested:"
 	@echo "  Ctrl+Alt+C       Check my selection        (grammar-lookup)"
-	@echo "  Ctrl+Alt+Return  Accept the suggestion     (grammar-action accept)"
-	@echo "  Ctrl+Alt+Escape  Dismiss the suggestion    (grammar-action dismiss)"
 	@echo "Or, any time:      grammar-pause 1h|15m|off  # quiet for a while, or back now"
 	@echo "A binding takes effect at the next login: kglobalaccel reads its config when it starts."
 
 uninstall:
 	-systemctl --user disable --now grammar-watch
 	rm -f $(UNITDIR)/grammar-watch.service
-	rm -f $(BINDIR)/grammar-action
 	rm -f $(BINDIR)/grammar-pause
 	rm -f $(APPDIR)/grammar-lookup.desktop
-	rm -f $(APPDIR)/grammar-accept.desktop $(APPDIR)/grammar-dismiss.desktop
 	rm -f $(ICONDIR)/grammar-ui.svg
 	-update-desktop-database $(APPDIR) 2>/dev/null
 	-systemctl --user daemon-reload

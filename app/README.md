@@ -1,11 +1,15 @@
 # grammar-ui app
 
-The settings window: the ignored words and the AI runner, in one Tauri v2 window that runs on Linux and
-Windows from this same source.
+The window: checking, rewriting, and the settings for both — one Tauri v2 app that runs on Linux and
+Windows from this same source. Checking is live as you type; a finding can be applied by itself or the
+whole text at once, with an undo; the report groups what the engine found by its own categories and says
+how the text reads.
 
 **No Rust of its own.** The engine sends `Access-Control-Allow-Origin: *`, so `src/main.js` calls it
-directly with `fetch` — `/v1/ai` for the runner and `/v2/ignore` for the words. `src-tauri/src/lib.rs`
-exists only to set one environment variable (below) and start the window.
+directly with `fetch` — `/v2/check` and `/v2/stats` for the text, `/v2/rewrite` for a rephrasing,
+`/v2/fix-sentence` and `/v2/dictionary` and `/v2/ignore` for the actions on a finding, `/v1/ai` for the
+runner, `/v2/languages` and `/status` on load. `src-tauri/src/lib.rs` exists only to set one environment
+variable (below) and start the window.
 
 ```bash
 npm install
