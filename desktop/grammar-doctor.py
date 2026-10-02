@@ -119,7 +119,7 @@ def check_install(bindir=None):
     install must have is the cheapest way to catch that — and it is exactly the failure this
     command exists for."""
     bindir = bindir or BINDIR
-    wanted = ("grammar-lookup", "grammar-watch", "grammar-doctor", "grammar-action",
+    wanted = ("grammar-lookup", "grammar-watch", "grammar-doctor",
               "grammar-pause", "grammar_core.py")
     missing = [name for name in wanted if not os.path.exists(os.path.join(bindir, name))]
     if missing:
@@ -270,7 +270,7 @@ def check_entries():
     start, the menu just draws a blank square. Same shape as the exec bit and the unimported name —
     a reference to something that is not there — so it is checked rather than assumed.
     """
-    wanted = ("grammar-lookup.desktop", "grammar-accept.desktop", "grammar-dismiss.desktop")
+    wanted = ("grammar-lookup.desktop",)
 
     found = [name for name in wanted if os.path.exists(os.path.join(APPDIR, name))]
     if len(found) != len(wanted):

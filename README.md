@@ -16,8 +16,6 @@ report through notifications and a dialog.
 | `grammar-lookup` | checks the text you have **selected**, on **Ctrl+Alt+C** |
 | `grammar-watch` | checks the sentence around your **caret** while you type, and offers a fix |
 | `grammar-doctor` | is the whole chain working? Every silent failure this product has, named with its fix |
-| `grammar-action` | `accept` / `dismiss` — what the keyboard shortcuts run |
-| `grammar-pause` | `15m` / `1h` / `off` — silence the checker for a while, or bring it back; `--blocks` lists the applications you have ignored, `--unblock <app>` checks in one of them again |
 | `grammar-pause` | `15m` / `1h` / `off` — silence the checker for a while, or bring it back; `--blocks` lists the applications you have ignored, `--unblock <app>` checks in one of them again |
 
 None of them needs a browser extension, and none of them reads a DOM: they read the accessibility

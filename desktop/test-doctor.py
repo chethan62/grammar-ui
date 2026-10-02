@@ -170,8 +170,7 @@ def test_entries_check(doctor):
     tmp = tempfile.mkdtemp(prefix="grammar-entries-")
     data = os.path.join(tmp, "share")
     old_apdir, old_data = doctor.APPDIR, os.environ.get("XDG_DATA_HOME")
-    names = ("grammar-lookup.desktop", "grammar-accept.desktop",
-             "grammar-dismiss.desktop")
+    names = ("grammar-lookup.desktop",)
     try:
         doctor.APPDIR = os.path.join(tmp, "applications")
         os.makedirs(doctor.APPDIR)
@@ -196,7 +195,8 @@ def test_entries_check(doctor):
             fh.write("<svg/>")
         essential, okd, detail, fix = doctor.check_entries()
         ok(okd is True, "with the icon installed the check passes: %r" % detail)
-        ok("3 installed" in detail, "and it says how many entries it looked at: %r" % detail)
+        ok(("%d installed" % len(names)) in detail,
+           "and it says how many entries it looked at: %r" % detail)
     finally:
         doctor.APPDIR = old_apdir
         if old_data is None:
