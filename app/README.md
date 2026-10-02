@@ -32,9 +32,10 @@ webview paints nothing: measured as a window filled with a single colour and
 `Failed to create GBM buffer of size 460x760` on stderr, with `10de:1f99, driver (null)` in the GL log.
 It is set only when it is not already set, so the fast path can be put back.
 
-## Still to come
+## What is deliberately not here
 
-**Paused applications** and **Pause** are in the old window and not this one. Both are owned by files
-(`~/.config/grammar-server/blocked-apps`, `~/.cache/grammar-server/paused-until`) rather than by the
-engine's HTTP surface, so each needs a small Rust command; the ignored words and the runner were the two
-whose owner already speaks HTTP.
+**Pause** and **blocked applications**. They belong to the watcher, not to this window: `paused-until` and
+`blocked-apps` are read by `grammar-watch` and written by `grammar-pause`, and the engine's HTTP surface has
+no pause in it at all. The window is also the wrong home for them — it is the cross-platform client and the
+watcher is Linux-only, so a Pause button here would be a control for a daemon a Windows user does not have.
+`grammar-pause 15m|1h|off` is the interface, and it also lists and unblocks applications.

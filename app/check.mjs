@@ -172,3 +172,24 @@ if (!live) {
   console.log(`  app: the preset contract holds (${state.presets.length} presets, ${custom.length} custom, ` +
               `labels present, id == what POST accepts)`);
 }
+
+// --- which finding is under the caret ---------------------------------------------------------------
+// The strip shows the finding at the caret. Clicking a row selects that finding's own span, so the caret
+// lands *on* its offset, and the end of the span is a caret position too — both ends inclusive is the whole
+// rule. It was a strict comparison until a real browser run showed the strip refusing to appear for the one
+// finding it had just been asked about.
+const cStart = source.indexOf("function findingAt(");
+if (cStart < 0) throw new Error("findingAt() is gone from src/main.js");
+const cBody = source.slice(cStart, source.indexOf("\n}\n", cStart) + 3);
+const findingAt = new Function(`${cBody}\nreturn findingAt;`)();
+const spans = [{ offset: 0, length: 3 }, { offset: 10, length: 5 }];
+for (const [caret, want] of [[0, spans[0]], [2, spans[0]], [3, spans[0]],
+                            [4, null], [10, spans[1]], [13, spans[1]], [15, spans[1]], [16, null]]) {
+  if (findingAt(spans, caret) !== want) {
+    throw new Error(`findingAt(caret=${caret}) = ${JSON.stringify(findingAt(spans, caret))}, expected ${JSON.stringify(want)}`);
+  }
+}
+if (findingAt([], 3) !== null) throw new Error("no findings, no strip");
+if (findingAt(spans, undefined) !== null) throw new Error("no caret, no strip");
+if (findingAt([{ offset: 5, length: 0 }], 5) !== null) throw new Error("a zero-length finding has nothing to sit in");
+console.log("  app: the caret strip finds the finding under the caret, on its own offset and at its end");
