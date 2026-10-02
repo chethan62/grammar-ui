@@ -471,23 +471,33 @@ async function load() {
       ? "The engine stops reporting these; removing one brings the findings back."
       : "Nothing is ignored yet.";
 
+    // The engine's Preset struct sends id/label/hint/keyEnv/local. This read `name`, a field it has never
+    // sent, so every entry said "undefined" and every option's value was the string "undefined" — the panel
+    // could not name the provider it was showing, let alone reach a custom one.
     const presets = (ai.presets || []).slice();
-    if (!presets.some((p) => p.name === ai.provider)) {
-      presets.unshift({ name: ai.provider || "none", url: "", model: "" });
+    if (ai.provider && ai.provider !== "none" && !presets.some((p) => p.id === ai.provider)) {
+      // A backend chosen from a shell can name something no preset covers: show it rather than hide it.
+      presets.unshift({ id: ai.provider, label: ai.provider, url: "", model: "", hint: "" });
     }
-    $("provider").replaceChildren(...presets.map((p) => {
+    // "off" is not a preset — the engine treats it as its own case — so the panel supplies it.
+    const off = document.createElement("option");
+    off.value = "none";
+    off.textContent = "off — no rewriting";
+    off.dataset.hint = "Every check still works; Rewrite is simply not offered.";
+    $("provider").replaceChildren(off, ...presets.map((p) => {
       const option = document.createElement("option");
-      option.value = p.name;
-      option.textContent = p.name === "none" ? "off" : p.name;
+      option.value = p.id;                             // the API takes this id back, so it must be the id
+      option.textContent = p.label || p.id;            // and this is the name a person recognises
       option.dataset.url = p.url || "";
       option.dataset.model = p.model || "";
       option.dataset.env = p.keyEnv || "";
-      option.selected = p.name === ai.provider;
+      option.dataset.hint = p.hint || "";
+      option.selected = p.id === ai.provider;
       return option;
     }));
-    const picked = $("provider").selectedOptions[0];
     $("url").value = ai.url || "";
     $("model").value = ai.model || "";
+    $("apiKey").value = "";                            // the engine never sends a key back, by design
     $("models").replaceChildren(...(ai.models || []).map((m) => {
       const option = document.createElement("option");
       option.value = m;
@@ -514,12 +524,15 @@ async function load() {
       ? "Checking as " + $("language").selectedOptions[0].textContent + "."
       : "Whatever the engine is configured for: " + (status.dialect || "unknown") + ".";
 
-    $("providerNote").textContent = ai.provider === "none"
-      ? "Every check still works; Rewrite is simply not offered."
-      : (picked && picked.dataset.env && !ai.keySet
-         ? "Needs " + picked.dataset.env + " in the environment, or a key in your keyring."
-         : (String(ai.url || "").includes("127.0.0.1")
-            ? "Local: nothing leaves this machine." : ""));
+    showProviderNote();
+    const picked = $("provider").selectedOptions[0];
+    if (picked && picked.dataset.env && !ai.keySet && !ai.keySource) {
+      $("providerNote").textContent += " Needs " + picked.dataset.env +
+        " in the environment, or a key below.";
+    }
+    $("keyNote").textContent = ai.keySet
+      ? "A key is saved" + (ai.keySource ? " (" + ai.keySource + ")" : "") + "; blank keeps it."
+      : "No key saved. Local servers usually need none.";
     $("modelNote").textContent = (ai.models || []).length
       ? "What this server reports, or type any model name."
       : "The server offers no list; type the model name it should use.";
@@ -535,9 +548,26 @@ async function load() {
   }
 }
 
+// The note under the picker is the engine's own preset hint, so a backend added to its table appears here
+// with its explanation and nothing in this file changes. A preset that carries no URL of its own is the
+// custom case, and the address field opens for it — but only while that field is actually empty. Keying it
+// on the preset alone made a saved custom endpoint nag "give the base URL" at a filled-in field, and left
+// the field folded away when the one thing you want to change is what's in it.
+function showProviderNote() {
+  const picked = $("provider").selectedOptions[0];
+  const needsUrl = !!picked && picked.value !== "none" && !$("url").value.trim();
+  $("address").open = needsUrl;
+  $("providerNote").textContent = ((picked && picked.dataset.hint) || "") +
+    (needsUrl ? " Give the full base URL below." : "");
+}
+
 $("provider").addEventListener("change", () => {
   const picked = $("provider").selectedOptions[0];
   if (picked) { $("url").value = picked.dataset.url; $("model").value = picked.dataset.model; }
+  // The key belongs to the provider it was issued by, so switching throws away anything typed for the last
+  // one rather than saving it against the wrong service.
+  $("apiKey").value = "";
+  showProviderNote();
 });
 
 // Adding a word used to be the card's job. With the card gone this tab is the only place it can happen.
@@ -594,10 +624,13 @@ $("save").addEventListener("click", async () => {
   $("save").disabled = true;
   $("saveState").textContent = "Saving…";
   try {
+    const payload = { provider: $("provider").value, url: $("url").value.trim(),
+                      model: $("model").value.trim() };
+    // An empty key means "keep the saved one" to the engine, so a blank field must not be sent at all.
+    if ($("apiKey").value) payload.apiKey = $("apiKey").value;
     await call("/v1/ai", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider: $("provider").value, url: $("url").value.trim(),
-                             model: $("model").value.trim() }),
+      body: JSON.stringify(payload),
     });
     await load();
     $("saveState").textContent = "Saved.";

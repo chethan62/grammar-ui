@@ -139,6 +139,10 @@ details.more[open] summary { margin-bottom:var(--s1); }
            border:1px solid var(--border); border-radius:var(--radius); }
 .atcaret .finding { padding:0; }
 
+/* One motion, one place to switch it off. Nothing here animates for effect — this is the hover fade — and
+   a system asking for less motion gets none of it. */
+@media (prefers-reduced-motion: reduce) { * { transition:none !important; } }
+
 /* The report: the findings by category, each count a filter, and how the text reads. */
 .report { margin-top:var(--s2); }
 .chips { display:flex; flex-wrap:wrap; gap:var(--s1); }

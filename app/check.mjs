@@ -139,3 +139,36 @@ for (const [input, want] of [[null, 600], [0, 300], [39, 300], [40, 900], [249, 
   if (got !== want) throw new Error(`debounceMs(${input}) = ${got}, expected ${want}`);
 }
 console.log("  app: the debounce bands match grammar_core.debounce_ms at every boundary");
+
+// --- the preset contract ------------------------------------------------------------------------------
+// The panel builds its provider picker from GET /v1/ai. It once read `p.name`, a field the engine has never
+// sent, so every entry rendered as "undefined" and the custom-endpoint preset became unreachable — the bug
+// class this file exists for: a client written against an assumed response rather than a real one. This
+// checks the fields the panel reads against the fields the API actually sends, and skips (like every other
+// live precondition here) when no engine is running.
+const readsId = source.includes("option.value = p.id") && source.includes("p.label || p.id");
+if (!readsId) throw new Error("load() no longer builds the provider picker from the preset's id/label");
+if (/\bp\.name\b/.test(source)) throw new Error("main.js reads p.name, which GET /v1/ai does not send");
+
+let live = "";
+try {
+  const answer = await fetch("http://127.0.0.1:8875/v1/ai", { signal: AbortSignal.timeout(4000) });
+  live = answer.ok ? "ok" : "";
+} catch { /* no engine: the shape below cannot be checked, and that is not a failure */ }
+if (!live) {
+  console.log("  app: the preset contract was not checked (no engine running)");
+} else {
+  const state = await (await fetch("http://127.0.0.1:8875/v1/ai", { signal: AbortSignal.timeout(4000) })).json();
+  if (!Array.isArray(state.presets) || !state.presets.length) throw new Error("GET /v1/ai sent no presets");
+  for (const p of state.presets) {
+    if (typeof p.id !== "string" || !p.id) throw new Error(`a preset has no id: ${JSON.stringify(p)}`);
+    if (typeof p.label !== "string" || !p.label) throw new Error(`preset ${p.id} has no label to show`);
+    if (typeof p.url !== "string") throw new Error(`preset ${p.id} has a non-string url`);
+  }
+  // The custom-endpoint case the panel depends on: a preset with no URL of its own, which is what makes the
+  // address field open. If it ever disappears, adding a custom AI is gone, and that should fail loudly here.
+  const custom = state.presets.filter((p) => !p.url);
+  if (!custom.length) throw new Error("no preset without a url — the custom-endpoint case is gone");
+  console.log(`  app: the preset contract holds (${state.presets.length} presets, ${custom.length} custom, ` +
+              `labels present, id == what POST accepts)`);
+}
