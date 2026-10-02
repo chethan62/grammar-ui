@@ -25,6 +25,12 @@
 }
 @media (prefers-color-scheme: dark) {
   :root {
+    /* The document's used scheme, not only the palette. The select's popup is drawn by the platform's widget
+       theme and ignores this stylesheet — measured with the list open: it came out 47% #FFFFFF with GTK's
+       own #3584E4 highlight while the closed control was #242B34 from the tokens. A page that declares
+       `color-scheme: dark` here is asking for the dark variant of those widgets, which is the lever that
+       reaches a popup; putting it on the control alone did not. */
+    color-scheme: dark;
     --surface:#1a1f26; --chip:#242b34; --hover:#2c343e; --border:#2f3844;
     --text:#e7eaee; --muted:#9aa4b2; --faint:#858f9d;
     --accent:#e8ebef; --accentInk:#11151a; --accentHover:#ffffff;
