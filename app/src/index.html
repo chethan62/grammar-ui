@@ -42,20 +42,13 @@
   </section>
 
   <section role="tabpanel" id="panel-rewrite" aria-labelledby="tab-rewrite" hidden>
-    <label class="caption" for="source">Rewrite</label>
-    <textarea id="source" rows="4" spellcheck="false" placeholder="Paste or type the text to rephrase"></textarea>
-    <div class="add">
-      <input id="intent" placeholder="intent: one word, e.g. shorten" spellcheck="false"
-             pattern="[a-z]{1,20}" aria-label="Intent, one lowercase word up to 20 letters">
-      <input id="tone" placeholder="tone: optional, e.g. formal" spellcheck="false" aria-label="Tone, optional">
-    </div>
     <div class="add">
       <button class="primary" id="rewrite">Rewrite</button>
       <span class="status" id="rewriteState" role="status" aria-live="polite"></span>
     </div>
+    <p class="note">Rephrases the text on the Check tab, so there is one text to keep track of rather than
+       two. Pick a version to put it back there.</p>
     <div id="candidates"></div>
-    <p class="note">The intent must be one lower-case word of up to 20 letters — the engine refuses
-       anything else. Tone is free text and only steers the model.</p>
   </section>
 
   <section role="tabpanel" id="panel-settings" aria-labelledby="tab-settings" hidden>

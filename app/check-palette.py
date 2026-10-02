@@ -67,6 +67,13 @@ outside_roots = re.sub(r":root\s*\{[^}]*\}", "", css, flags=re.S)
 for stray in sorted(set(re.findall(r"#[0-9a-fA-F]{3,8}\b", outside_roots))):
     drift.append("%s is written outside a :root block — use a var(--token)" % stray)
 
+# The label's sizing is keyed on a class, not on its tag. It was a <span> and became a <button>, and the
+# selector written for `span` then stopped applying — which clipped every long finding message to one line at
+# the window edge. This is the check that keeps the two ends agreeing.
+if '"flat jump"' in mjs and ".finding .jump" not in css:
+    drift.append("the finding label is a button but no `.finding .jump` rule sizes it — long messages will "
+                 "be clipped instead of wrapping")
+
 if drift:
     print("  app: PALETTE DRIFTED from grammar_core.card_colors(): " + ", ".join(drift))
     sys.exit(1)
