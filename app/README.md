@@ -8,8 +8,17 @@ how the text reads.
 **No Rust of its own.** The engine sends `Access-Control-Allow-Origin: *`, so `src/main.js` calls it
 directly with `fetch` — `/v2/check` and `/v2/stats` for the text, `/v2/rewrite` for a rephrasing,
 `/v2/fix-sentence` and `/v2/dictionary` and `/v2/ignore` for the actions on a finding, `/v1/ai` for the
-runner, `/v2/languages` and `/status` on load. `src-tauri/src/lib.rs` exists only to set one environment
-variable (below) and start the window.
+runner, `/v2/languages`, `/status` and `/v2/pause` on load. `src-tauri/src/lib.rs` exists only to set one
+environment variable (below) and start the window.
+
+**A finding's action follows what the engine can do with it.** harper offers replacements for spelling and
+the mechanical rules, so those rows get "Fix sentence" — its first suggestion per finding, across the whole
+sentence. A style rule harper can only *see* gets "Rephrase" instead: passive voice comes back from
+`/v2/check` with no replacements at all, and `/v2/fix-sentence` returns that text byte-identical, so a "Fix
+sentence" button on it was a control that did nothing when pressed. "Rephrase" sends **that one sentence** to
+the model — not the whole draft, which would rewrite text the reader was happy with — and puts what comes
+back through the checker again, so the model proposes and harper disposes. With no runner configured the row
+offers nothing, rather than a button that cannot work.
 
 ```bash
 npm install
@@ -34,8 +43,10 @@ It is set only when it is not already set, so the fast path can be put back.
 
 ## What is deliberately not here
 
-**Pause** and **blocked applications**. They belong to the watcher, not to this window: `paused-until` and
-`blocked-apps` are read by `grammar-watch` and written by `grammar-pause`, and the engine's HTTP surface has
-no pause in it at all. The window is also the wrong home for them — it is the cross-platform client and the
-watcher is Linux-only, so a Pause button here would be a control for a daemon a Windows user does not have.
-`grammar-pause 15m|1h|off` is the interface, and it also lists and unblocks applications.
+**A Pause button.** The pause belongs to the watcher, not to this window: `paused-until` and
+`blocked-apps` are read by `grammar-watch` and written by `grammar-pause`. The window *shows* the state —
+Settings carries a read-only line fed by the engine's `GET /v2/pause` — and cannot change it, which is the
+honest split rather than an omission: the watcher is Linux-only and this window also ships on Windows, so a
+Pause button here would be a control for a daemon half the users do not have, while *reading* a state that
+arrives as a file is something every platform can do truthfully. `grammar-pause 15m|1h|4h|off` is the
+interface, and it also lists and unblocks applications.

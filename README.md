@@ -73,10 +73,13 @@ An application that publishes no accessible text (most terminals, Electron apps 
 `--force-renderer-accessibility`) simply gets no suggestions — the a11y bus is the only door into
 another application's text, and there is no other way in.
 
-**Ignoring a word and pausing an application used to be buttons on the card.** With the card gone
-they have no UI. The engine still owns its ignore list (`GET`/`POST /v2/ignore`) and `grammar-pause`
-still silences the checker and lists the applications you have paused — but both are a shell or an
-HTTP call now. That is the cost of removing the surface, and it is better said than discovered.
+**Ignoring a word and pausing an application used to be buttons on the card.** The card is gone, and what
+came back is uneven on purpose. Ignoring a word has a home again: the ignored list is editable in the
+window's Settings tab (`GET`/`POST /v2/ignore`). The pause is *shown* there read-only (`GET /v2/pause`), so
+it is visible without being settable — which is the honest split, since the watcher that owns it is
+Linux-only and the window also ships on Windows. Blocking an application has no UI at all, and neither does
+setting a pause: both are `grammar-pause` from a shell (`15m|1h|4h|off`, `--blocks`, `--unblock <app>`).
+That is the cost of removing the surface, and it is better said than discovered.
 
 ## Install (Linux, current user)
 
