@@ -60,6 +60,13 @@ for probe, want in py_bands.items():
     if ("return %d;" % want) not in js_body:
         drift.append("debounce_ms(%s)=%s is missing from src/main.js" % (probe, want))
 
+# A stylesheet stops being extensible the moment a colour is written where a token belongs: the next theme
+# is then a hunt through every rule instead of one block. Every literal lives in a :root block, and this is
+# what keeps the tokens a system rather than a habit.
+outside_roots = re.sub(r":root\s*\{[^}]*\}", "", css, flags=re.S)
+for stray in sorted(set(re.findall(r"#[0-9a-fA-F]{3,8}\b", outside_roots))):
+    drift.append("%s is written outside a :root block — use a var(--token)" % stray)
+
 if drift:
     print("  app: PALETTE DRIFTED from grammar_core.card_colors(): " + ", ".join(drift))
     sys.exit(1)

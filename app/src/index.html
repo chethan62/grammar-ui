@@ -78,10 +78,16 @@
     <div class="field"><select id="provider"></select></div>
     <p class="note" id="providerNote"></p>
 
-    <details class="more"><summary>Advanced: the server address</summary>
+    <details class="more" id="address"><summary>Advanced: the server address</summary>
       <label class="caption" for="url">Address</label>
       <div class="field"><input id="url" spellcheck="false"></div>
       <p class="note">The base URL of the server, no /v1 needed at the end.</p>
+      <!-- Write-only by design: the engine never sends a key back, so this starts empty and an empty value
+           means "keep the saved one". Any OpenAI-compatible endpoint that needs a credential needs this. -->
+      <label class="caption" for="apiKey">API key</label>
+      <div class="field"><input id="apiKey" type="password" autocomplete="off" spellcheck="false"
+                                placeholder="leave blank to keep the saved key"></div>
+      <p class="note" id="keyNote"></p>
     </details>
 
     <label class="caption" for="model">Model</label>
