@@ -3,7 +3,7 @@ Type=Application
 Name=Grammar
 GenericName=Writing checker
 Comment=Check and rewrite your writing against the local engine
-Exec=@BINDIR@/grammar
+Exec=env GTK_THEME=Adwaita:dark @BINDIR@/grammar
 Icon=grammar-ui
 Terminal=false
 Categories=Utility;TextTools;
