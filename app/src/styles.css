@@ -37,6 +37,11 @@
     --up:#5fbf85; --down:#e08a72;
   }
 }
+
+/* The platform's widget theme is cached at first popup creation (WebKitGTK bug). Declaring the scheme
+   on each <select> forces the correct variant per-control, so the first-open bug doesn't cascade. */
+select { color-scheme: dark; }
+
 * { box-sizing:border-box; }
 /* padding-bottom clears the fixed footer above (its 32px control + 16px border gap + its 16px
    offset) so the last row of a long list is never behind it. */
