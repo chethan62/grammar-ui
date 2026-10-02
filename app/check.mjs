@@ -86,7 +86,45 @@ if (findingsFrom({}, emojiText).length !== 0) throw new Error("a response with n
 if (findingsFrom({ matches: [{ message: "x", offset: 9999, length: 4, replacements: [] }] }, emojiText).length !== 1) {
   throw new Error("an out-of-range offset must still be a row, not a crash");
 }
-console.log("  app: the finding model holds (UTF-16 offsets, empty replacements, out-of-range)");
+// the category is what the report groups by, so it has to survive the model
+const styled = findingsFrom({ matches: [{ message: "x", offset: 0, length: 1, replacements: [],
+  rule: { id: "R", category: { id: "STYLE", name: "Style" } } }] }, "a")[0];
+if (styled.category !== "Style") throw new Error(`the rule category must survive: got ${styled.category}`);
+const uncategorised = findingsFrom({ matches: [{ message: "x", offset: 0, length: 1, replacements: [] }] }, "a")[0];
+if (uncategorised.category !== "Other") throw new Error("a finding with no category must land in Other");
+console.log("  app: the finding model holds (UTF-16 offsets, empty replacements, out-of-range, category)");
+
+// --- Fix all: every suggestion in one pass ----------------------------------------------------------
+// The offset arithmetic is the whole risk: applying left to right moves every offset still to be applied.
+// Same trick again, and the same reason as the top of this file: the interpolated text is this repo's own
+// src/main.js — the subject of the test — so there is no boundary being crossed and no other way to run a
+// function that only exists as source.
+const aStart = source.indexOf("function applyAll(");
+if (aStart < 0) throw new Error("applyAll() is gone from src/main.js");
+const aBody = source.slice(aStart, source.indexOf("\n}\n", aStart) + 3);
+const applyAll = new Function(`${aBody}\nreturn applyAll;`)();
+
+const edit = (offset, length, after) => ({ offset, length, after, before: "x", rule: "", category: "Other" });
+const two = applyAll("teh wurd here", [edit(0, 3, "the"), edit(4, 4, "word")]);
+if (two.text !== "the word here" || two.applied !== 2) throw new Error(`two fixes: ${two.text} (${two.applied})`);
+// the engine returns findings in text order; the result must not depend on it
+const reversed = applyAll("teh wurd here", [edit(4, 4, "word"), edit(0, 3, "the")]);
+if (reversed.text !== two.text) throw new Error("the result must not depend on the order findings arrive in");
+// a finding with no suggestion is nothing to apply, not a failure
+const none = applyAll("teh wurd", [edit(0, 3, null), edit(4, 4, "word")]);
+if (none.text !== "teh word" || none.applied !== 1 || none.skipped !== 0) {
+  throw new Error(`no-suggestion row: ${none.text}, applied ${none.applied}, skipped ${none.skipped}`);
+}
+// an overlapping pair must not write twice over the same characters: one is kept, the other skipped
+const over = applyAll("the cat sat", [edit(0, 7, "A"), edit(4, 3, "B")]);
+if (over.text !== "the B sat" || over.applied !== 1 || over.skipped !== 1) {
+  throw new Error(`overlap: ${JSON.stringify(over.text)}, applied ${over.applied}, skipped ${over.skipped}`);
+}
+// the bug that shipped once already: offsets are UTF-16 code units, so an emoji before a fix must not
+// shift it — the slice is by code unit, and this is the check that says so
+const emojiFix = applyAll("🙂 teh", [edit(3, 3, "the")]);
+if (emojiFix.text !== "🙂 the") throw new Error(`emoji offset: ${JSON.stringify(emojiFix.text)}`);
+console.log("  app: Fix all applies every suggestion in one pass, in either arrival order");
 
 // --- the debounce bands -----------------------------------------------------------------------------
 // Ported from grammar_core.debounce_ms, whose docstring explains them. The boundaries are the whole risk
