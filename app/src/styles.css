@@ -12,14 +12,14 @@
   --up:#2f7d4f; --down:#a8442c;                   /* status dot: 3:1+ against --surface, and never the
                                                      only signal — the word beside it says the same */
 
-  /* space: the 4/8 rhythm */
-  --s1:4px; --s2:8px; --s3:16px; --s4:24px;
+  /* space: the 4/8 rhythm, tightened for a denser window (the compact pass halved the two biggest steps) */
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px;
 
   /* type: one scale, four steps */
   --t-small:11px; --t-body:12.5px; --t-heading:13px; --t-title:18px;
 
   /* shape */
-  --control:32px; --radius:7px;
+  --control:28px; --radius:7px;
 
   color-scheme: light dark;
 }
@@ -43,9 +43,9 @@
 select { color-scheme: dark; }
 
 * { box-sizing:border-box; }
-/* padding-bottom clears the fixed footer above (its 32px control + 16px border gap + its 16px
-   offset) so the last row of a long list is never behind it. */
-body { margin:0; padding:var(--s3); padding-bottom:72px; background:var(--surface); color:var(--text);
+/* padding-bottom clears the fixed footer above (its 28px control + two 12px gaps) so the last row of a
+   long list is never behind it. */
+body { margin:0; padding:var(--s3); padding-bottom:60px; background:var(--surface); color:var(--text);
        font-family:"Inter","Noto Sans",system-ui,sans-serif; font-size:var(--t-body); line-height:1.5; }
 
 /* ---- header ---------------------------------------------------------------------------------- */
@@ -121,8 +121,8 @@ section[role=tabpanel] h2.caption:first-child { margin-top:0; }
 /* A textarea is not a one-line control, so it opts out of the 32px height while keeping the same radius,
    border and padding as everything else. resize:vertical only — the window is what gets sized. */
 textarea { font:inherit; font-size:var(--t-body); color:var(--text); background:var(--chip);
-           border:1px solid var(--border); border-radius:var(--radius); padding:8px 10px; width:100%;
-           min-height:96px; resize:vertical; line-height:1.5; }
+           border:1px solid var(--border); border-radius:var(--radius); padding:6px 10px; width:100%;
+           min-height:72px; resize:vertical; line-height:1.5; }
 /* wrap: three actions and a message do not fit a 460px window on one line, and the message is the
    part worth reading. */
 .finding, .candidate { align-items:flex-start; gap:var(--s2); padding:var(--s1) 0; flex-wrap:wrap; }
