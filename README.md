@@ -171,9 +171,11 @@ moment someone's writing improves is worse than no suite. It also *types* — th
 takes no synthesised keystrokes, so the app is started on the X backend and the suite types through
 `xdotool` — and asserts the autocomplete end to end: typing offers the engine's own completions, and
 clicking one completes the word at the caret. It needs a display, `pyatspi`, and
-`xdotool`, so it is not part of the CI gate: `make test` runs it too, and it skips there with the reason
-it skipped. Clicks and navigation go through AT-SPI actions rather than synthesised input; only the typed
-text goes through `xdotool`, on the X backend — KWin's Wayland session takes no keystrokes any other way.
+`xdotool`, so it is not part of the `check` CI job: `make test` runs it too, and it skips there with the reason
+it skipped — the `e2e` CI job exists to give it a display, and builds the engine and the window before
+driving it under Xvfb. Clicks and navigation go through AT-SPI actions rather than synthesised input; only
+the typed text goes through `xdotool`, on the X backend — KWin's Wayland session takes no keystrokes any
+other way.
 
 **The live legs are opt-in**, through `GRAMMAR_LIVE=1`:
 
