@@ -7,9 +7,10 @@
 
 import { $, showTab, call, say } from "./shell.js";
 import { state } from "./model.js";
-import { showAtCaret, saveDraft, setRecheck } from "./rows.js";
+import { showAtCaret, saveDraft, setRecheck, recheck } from "./rows.js";
 import { check, liveCheck, fixAll } from "./flow.js";
 import { load, rewrite, addWord, showProviderNote } from "./panels.js";
+import { wireCompletion } from "./wordcomplete.js";
 
 // A row's actions end by re-checking the text, and they reach check() through this seam rather than by
 // importing it (see rows.js: importing it there would make rows and flow a cycle). Wired once, here.
@@ -48,11 +49,21 @@ $("undo").addEventListener("click", async () => {
   await check();
   $("announce").textContent = "Undone.";
 });
+// Completion for the two boxes a word is typed into. The draft's caret decides which word is meant; the word
+// list's box holds one word, so its whole value is the token. A click fills that box in rather than adding
+// the word, so an accepted suggestion still goes through Add where the user can see what they are adding.
+const draftWords = wireCompletion({
+  input: $("draft"), box: $("draftWords"), caret: true, after: () => recheck(),
+});
+const addWords = wireCompletion({ input: $("newWord"), box: $("addWords") });
+
 $("draft").addEventListener("input", () => {
   // An edit after Fix all makes the kept copy the wrong thing to go back to, so Undo goes with it.
   state.undo = null; $("undo").hidden = true;
   saveDraft(); liveCheck();
+  draftWords.suggest();
 });
+$("newWord").addEventListener("input", () => addWords.suggest());
 // Ctrl+Enter checks, matching the add field that submits on Enter — and it must not swallow plain Enter,
 // which inserts a newline in a textarea.
 $("draft").addEventListener("keydown", (event) => {

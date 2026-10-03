@@ -21,6 +21,7 @@
   <section role="tabpanel" id="panel-check" aria-labelledby="tab-check">
     <label class="caption" for="draft">Text to check</label>
     <textarea id="draft" rows="5" spellcheck="false" placeholder="Paste or type the text to check"></textarea>
+    <div id="draftWords" class="candidates"></div>
     <div class="add">
       <button class="primary" id="check">Check</button>
       <button id="fixall">Fix all</button>
@@ -57,6 +58,7 @@
     <div class="add"><input id="newWord" placeholder="a word to stop reporting" spellcheck="false"
                             aria-label="Word to add to the dictionary">
       <button id="add">Add</button></div>
+    <div id="addWords" class="candidates"></div>
     <p class="note" id="wordsNote">Words harper itself accepts, in every editor.</p>
 
     <hr class="rule">

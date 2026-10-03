@@ -88,6 +88,21 @@ Linux-only and the window also ships on Windows. Blocking an application has no 
 setting a pause: both are `grammar-pause` from a shell (`15m|1h|4h|off`, `--blocks`, `--unblock <app>`).
 That is the cost of removing the surface, and it is better said than discovered.
 
+### Completing a word
+
+The draft completes the word you are typing, from harper's own dictionary (134,882 words) plus the words
+this machine has been taught — the taught ones first, because that is the word someone is reaching for
+again. `spec` offers `specular` before `specialist`; `webkit` offers `WebKitGTK`.
+
+Two letters is the shortest question worth asking. A click accepts: in the draft the word is replaced and
+the caret stays after it, and the word list's own box *fills in* rather than adding, so Add remains the only
+thing that writes. Possessives come last, so `didn` still reaches `didn't` while `spec` offers words a person
+would type. Affix stems (`specif`) do appear, because they are valid to harper and filtering them costs a
+lookup per word.
+
+The list comes from `GET /v2/complete?prefix=…` on the engine, so an editor client can offer the same
+completions without knowing anything about harper.
+
 ## Install (Linux, current user)
 
 ```bash

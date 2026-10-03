@@ -308,6 +308,7 @@ console.log("  app: the recheck seam throws until wired, then is the wired check
 
   // Every listener the wiring is supposed to install. A missing one is a control that does nothing.
   const wired = ["tab-check:click", "provider:change", "add:click", "newWord:keydown",
+                 "newWord:input",
                  "document:selectionchange", "check:click", "fixall:click", "undo:click",
                  "draft:input", "draft:keydown", "rewrite:click", "save:click", "window:focus"];
   const unwired = wired.filter((k) => !listeners.has(k));
@@ -345,6 +346,30 @@ console.log("  app: the recheck seam throws until wired, then is the wired check
   if (!/\/v2\/dictionary\?word=zzz$/.test(lastAsked.url) || lastAsked.method !== "DELETE") {
     throw new Error(`removing a word asked ${JSON.stringify(lastAsked)} — it must be DELETE ` +
       `/v2/dictionary?word=<word>, the endpoint that takes it back out of harper's dictionary`);
+  }
+  // Typing asks for the word at the CARET, not for the whole draft — which is what reading the value alone
+  // would send, and a completion for the entire text is not a completion.
+  cache.get("draft").value = "the report is spec";
+  cache.get("draft").selectionStart = 18;
+  await fire("draft:input");
+  // The listener is async and does not return its promise, so the request lands a tick later.
+  await new Promise((done) => setTimeout(done, 25));
+  const completions = asked.map((a) => a.url).filter((url) => url.includes("/v2/complete"));
+  if (!completions.some((url) => url.endsWith("/v2/complete?prefix=spec"))) {
+    throw new Error(`typing "spec" asked ${JSON.stringify(completions)} — it must ask ` +
+      `/v2/complete?prefix=spec, the word the caret is in and nothing else`);
+  }
+  // Accepting one replaces that word and leaves the caret after it. This is the part that fails silently:
+  // an off-by-one in the caret arithmetic produces a wrong word rather than an error.
+  const { accept } = await import("./src/wordcomplete.js");
+  const field = { value: "the report is spec", selectionStart: 18,
+                  setSelectionRange(start) { this.at = start; }, focus() {} };
+  accept(field, "spec", "specular");
+  if (field.value !== "the report is specular") {
+    throw new Error(`accepting a suggestion made ${JSON.stringify(field.value)}`);
+  }
+  if (field.at !== 22) {
+    throw new Error(`the caret went to ${field.at} — it belongs after the accepted word, at 22`);
   }
   await fire("rewrite:click");
   if (!/^Could not rewrite: /.test(recorded.rewriteState || "")) {
