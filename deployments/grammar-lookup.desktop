@@ -3,9 +3,13 @@ Type=Application
 Name=Check my selection
 GenericName=Check selected text
 Comment=Check the text selected in any application against the local engine
-Exec=@BINDIR@/grammar-lookup
+Exec=@BINDIR@/grammar --lookup
 Icon=grammar-ui
 Terminal=false
 Categories=Utility;TextTools;
 Keywords=grammar;spelling;check;selection;
 StartupNotify=false
+# One program, one icon. This entry exists so the global shortcut has something to bind to in System
+# Settings, not as a second launcher: it runs the same binary as the Grammar entry, in its lookup mode.
+# Without this the menu offers two identical cards and the user has to guess which is which.
+NoDisplay=true

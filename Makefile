@@ -53,10 +53,13 @@ check-app:
 	fi
 
 # Install for the current user: no sudo, and no unit ever references a checkout.
+# The mark has ONE source, app/src-tauri/icons/icon.svg, and both this target and install-app install that
+# same file. `deployments/grammar-ui.svg` used to be a second, older copy living here, so whichever target
+# ran last won and the menu could show a design the app had stopped using — which is exactly what happened.
 install:
 	install -d $(UNITDIR) $(BINDIR) $(APPDIR) $(ICONDIR)
 	install -m644 deployments/systemd/grammar-watch.service $(UNITDIR)/grammar-watch.service
-	install -m644 deployments/grammar-ui.svg $(ICONDIR)/grammar-ui.svg
+	install -m644 app/src-tauri/icons/icon.svg $(ICONDIR)/grammar-ui.svg
 	install -m755 desktop/grammar-lookup.py $(BINDIR)/grammar-lookup
 	install -m755 desktop/grammar-watch.py $(BINDIR)/grammar-watch
 	install -m755 desktop/grammar-doctor.py $(BINDIR)/grammar-doctor
@@ -70,7 +73,7 @@ install:
 	@echo "  systemctl --user enable --now grammar-watch   # suggestions as you type, anywhere"
 	@echo "Shortcuts are yours to choose (System Settings -> Shortcuts), and binding them is a"
 	@echo "manual step: this Makefile writes no keys, whatever an older README said. Suggested:"
-	@echo "  Ctrl+Alt+C       Check my selection        (grammar-lookup)"
+	@echo "  Ctrl+Alt+C       Check my selection        (grammar --lookup, the same binary)"
 	@echo "Or, any time:      grammar-pause 1h|15m|off  # quiet for a while, or back now"
 	@echo "A binding takes effect at the next login: kglobalaccel reads its config when it starts."
 

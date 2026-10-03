@@ -13,7 +13,7 @@ report through notifications and a dialog.
 
 ## What is here
 
-| `grammar-lookup` | checks the text you have **selected**, on **Ctrl+Alt+C** |
+| `grammar --lookup` | checks the text you have **selected**, on **Ctrl+Alt+C** — the same binary as the window |
 | `grammar-watch` | checks the sentence around your **caret** while you type, and offers a fix |
 | `grammar-doctor` | is the whole chain working? Every silent failure this product has, named with its fix |
 | `grammar-pause` | `15m` / `1h` / `off` — silence the checker for a while, or bring it back; `--blocks` lists the applications you have ignored, `--unblock <app>` checks in one of them again |
@@ -33,11 +33,16 @@ into another application's text.
 4. Ctrl+V replaces the selection
 
 ```bash
-grammar-lookup                                    # the dialog the shortcut runs
-GRAMMAR_NO_UI=1 grammar-lookup                    # print the corrected text (scripts, editors)
-GRAMMAR_API=http://cachyos.local:8875 grammar-lookup   # check against another machine
-GRAMMAR_LANG=en-GB grammar-lookup                 # check as another language
+grammar --lookup                                  # the dialog the shortcut runs
+GRAMMAR_NO_UI=1 grammar --lookup                  # print the corrected text (scripts, editors)
+GRAMMAR_API=http://cachyos.local:8875 grammar --lookup   # check against another machine
+GRAMMAR_LANG=en-GB grammar --lookup               # check as another language
 ```
+
+`grammar` is one program with two modes: no arguments opens the window, `--lookup` runs the selection
+checker. The checker itself is the python helper installed beside the binary, which the mode runs — it is
+an implementation detail, not a second command to remember. (`grammar-lookup` also stays on PATH for
+scripts that already call it, and `grammar-doctor` checks it is there.)
 
 The correction repeats until the text stops changing: the engine's sentence-capitalisation rule
 suggests `Teh` for a typo at the start of a sentence — it is correcting the capital, not the
@@ -49,8 +54,10 @@ if either becomes available.
 
 **The shortcut is yours to bind** — System Settings → Shortcuts → *Check my selection*, or the
 `kwriteconfig6` line under "Accept and dismiss from the keyboard" below, with the entry name
-`grammar-lookup.desktop`. This Makefile writes no keys. A binding takes effect at the next login,
-because kglobalaccel reads its config when it starts.
+`grammar-lookup.desktop`. That entry carries `NoDisplay=true`: it exists so the shortcut has something
+to bind to and runs the same binary as the Grammar entry, but it is deliberately not a second icon in
+the menu. This Makefile writes no keys. A binding takes effect at the next login, because kglobalaccel
+reads its config when it starts.
 
 ### Suggestions as you type
 
