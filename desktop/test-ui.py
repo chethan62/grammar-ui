@@ -19,8 +19,10 @@ CI. `make check-ui` starts an app, runs this, and stops it again.
 """
 
 import argparse
+import glob
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import time
@@ -49,6 +51,39 @@ def engine_counters(api):
         return (cache.get("entries"), cache.get("hits"), cache.get("misses"))
     except Exception:
         return None
+
+
+# The draft lives in the webview's localStorage: a SQLite ItemTable whose values are UTF-16LE. Seeding it
+# is how this suite gets a deterministic input, because the saved draft is the user's own text and may
+# contain nothing to find — a suite that fails when someone's writing improves is worse than no suite.
+APP_DATA = "~/.local/share/com.chethan62.grammar-ui/localstorage"
+SEED = "teh report is late."            # harper flags `teh`, so a finding must appear
+
+
+def draft_dbs():
+    return sorted(glob.glob(os.path.expanduser(os.path.join(APP_DATA, "*.localstorage"))))
+
+
+def draft_read(path):
+    conn = sqlite3.connect(path)
+    try:
+        row = conn.execute("select value from ItemTable where key = 'grammar-draft'").fetchone()
+        return row[0] if row else None
+    finally:
+        conn.close()
+
+
+def draft_write(path, value):
+    conn = sqlite3.connect(path)
+    try:
+        if value is None:
+            conn.execute("delete from ItemTable where key = 'grammar-draft'")
+        else:
+            conn.execute("insert or replace into ItemTable(key, value) values('grammar-draft', ?)",
+                         (value,))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 # The display is checked before pyatspi is imported, so a headless runner skips without needing the
@@ -174,10 +209,20 @@ def main():
     args = parser.parse_args()
 
     started = None
+    seeded = {}
     w = Window()
     if w.app is None and args.start:
         if not os.path.exists(args.binary):
             skip(f"no app running and nothing to start at {args.binary}")
+        # Seed a known draft while nothing has the file open — a running webview would write its own copy
+        # back over it — then put the user's own draft back once the app is stopped. Every origin is seeded
+        # because the dev server and the release build name their storage differently.
+        for db in draft_dbs():
+            try:
+                seeded[db] = draft_read(db)
+                draft_write(db, SEED.encode("utf-16-le"))
+            except Exception as error:
+                print(f"  note: could not seed {os.path.basename(db)}: {error}")
         started = subprocess.Popen([args.binary], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                    start_new_session=True)
         deadline = time.time() + args.wait
@@ -228,7 +273,15 @@ def main():
             print(f"  note: no engine at {api} — the check cannot be observed from here")
         else:
             check(reached, "clicking Check reached the engine (its counters moved)")
-        check(drew, f"the window drew the result ({len(w.finding_buttons())} finding button(s))")
+        if seeded:
+            # Deterministic: the seeded draft contains `teh`, so this finding must be drawn — and the
+            # assertion is about that word rather than about "something appeared".
+            flagged = [b for b in w.finding_buttons() if "teh" in b.lower()]
+            check(bool(flagged), f"the seeded mistake is drawn as a finding: {flagged[:1]}")
+        else:
+            check(drew, f"the window drew the result ({len(w.finding_buttons())} finding button(s))")
+            print("  note: an app was already running, so its draft was not seeded and the finding itself "
+                  "is not asserted — only that the click reached the engine")
 
         # An empty word must be ignored rather than written: the dictionary takes one word and refuses
         # a phrase, and the box has nothing in it.
@@ -248,6 +301,15 @@ def main():
                 started.wait(timeout=10)
             except Exception:
                 started.kill()
+            # The user's own draft goes back only after the app has stopped, or the webview would write its
+            # seeded copy back over the restore on the way out.
+            for db, value in seeded.items():
+                try:
+                    draft_write(db, value)
+                except Exception as error:
+                    # Loud on purpose: leaving someone else's text in the app is the one side effect this
+                    # suite must never have.
+                    print(f"  WARN could not restore the draft in {os.path.basename(db)}: {error}")
 
     print(f"  grammar-ui e2e: {len(PASSED)} assertions - "
           f"{'passed' if not FAILED else 'FAILED: ' + '; '.join(FAILED)}")
