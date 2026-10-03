@@ -2,11 +2,7 @@
     <linearGradient id="g" x1="0%" y1="0%" x2="35%" y2="100%">
       <stop offset="0%" stop-color="#6fcb93"/><stop offset="100%" stop-color="#2c7a4e"/>
     </linearGradient>
-    <mask id="m">
-      <rect width="1024" height="1024" fill="#000"/>
-      <g fill="#fff"><path d="M116 296 C 262 238 404 240 498 300 L498 816 C 404 756 262 754 116 812 Z"/><path d="M908 296 C 762 238 620 240 526 300 L526 816 C 620 756 762 754 908 812 Z"/></g>
-      <path d="M268 556 L 428 716 L 776 348" fill="none" stroke="#000" stroke-width="92" stroke-linecap="round" stroke-linejoin="round"/>
-    </mask>
+    <mask id="cut"><rect width="1024" height="1024" fill="#fff"/><g fill="#000"><rect x="196" y="360" width="150" height="46" rx="23"/><rect x="678" y="360" width="150" height="46" rx="23"/><rect x="196" y="470" width="120" height="46" rx="23"/><rect x="708" y="470" width="120" height="46" rx="23"/><rect x="196" y="580" width="148" height="46" rx="23"/><rect x="680" y="580" width="148" height="46" rx="23"/><rect x="196" y="690" width="96" height="46" rx="23"/><rect x="732" y="690" width="96" height="46" rx="23"/></g></mask>
   </defs>
-  <rect width="1024" height="1024" fill="url(#g)" mask="url(#m)"/>
+  <g fill="url(#g)" mask="url(#cut)"><path d="M116 296 C 262 238 404 240 498 300 L498 816 C 404 756 262 754 116 812 Z"/><path d="M908 296 C 762 238 620 240 526 300 L526 816 C 620 756 762 754 908 812 Z"/></g>
 </svg>
