@@ -137,8 +137,11 @@ textarea { font:inherit; font-size:var(--t-body); color:var(--text); background:
 .finding button, .candidate button { flex:0 0 auto; }
 .finding + .finding, .candidate + .candidate { border-top:1px solid var(--border); }
 #candidates { margin-top:var(--s2); }
-/* The model's answer to one row's sentence, tied to that row by a rule down its left edge. */
-.candidates { margin:var(--s1) 0 var(--s2) var(--s3); padding-left:var(--s2); border-left:2px solid var(--border); }
+/* The completion lists scroll internally: a 500px window gives the draft's list room for six rows before
+   the fixed footer, and a list that pushed the page down would hide its own end behind that footer. */
+  #draftWords, #addWords { max-height: calc(var(--control) * 6); overflow-y: auto; }
+  /* The model's answer to one row's sentence, tied to that row by a rule down its left edge. */
+  .candidates { margin:var(--s1) 0 var(--s2) var(--s3); padding-left:var(--s2); border-left:2px solid var(--border); }
   .candidates button.flat { display:block; width:100%; text-align:left; padding:2px 8px; border-radius:4px; }
   .candidates button.flat.selected { background:var(--hover); }
 
