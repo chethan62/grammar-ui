@@ -8,11 +8,10 @@ exclusive, and that the app survives being driven.
 
 Why actions instead of keystrokes: this desktop is KDE Wayland, where KWin implements no virtual-keyboard
 protocol, so synthesised input never arrives (the same reason grammar-lookup cannot paste for you). AT-SPI
-actions do work, so every interaction here is an action. Text is not typed either — this WebKit exposes no
-editable-text interface on the entry (interfaces: Accessible, Action, Collection, Component, Hyperlink,
-Text) — so the draft is whatever the app already holds and the assertions are about the app's RESPONSE,
-not about particular words. The app persists its draft in localStorage, so a check has real text to work
-on after the first run.
+actions do work, so every interaction here is an action — except actual typing, which is sent through the X
+server with xdotool; the app is therefore started with GDK_BACKEND=x11 so those events arrive. The entry
+exposes no editable-text interface, so text goes in through xdotool and is read back through the entry's
+Text interface, which does expose the live value.
 
 Skips (exit 0) when there is no display, no pyatspi, or no app on the bus, so `make test` stays green on
 CI. `make check-ui` starts an app, runs this, and stops it again.
@@ -22,6 +21,7 @@ import argparse
 import glob
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -233,7 +233,8 @@ def main():
             except Exception as error:
                 print(f"  note: could not seed {os.path.basename(db)}: {error}")
         started = subprocess.Popen([args.binary], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                   start_new_session=True)
+                                   start_new_session=True,
+                                   env={**os.environ, "GDK_BACKEND": "x11"})
         deadline = time.time() + args.wait
         while time.time() < deadline and w._find_app() is None:
             time.sleep(0.7)
@@ -291,6 +292,71 @@ def main():
             check(drew, f"the window drew the result ({len(w.finding_buttons())} finding button(s))")
             print("  note: an app was already running, so its draft was not seeded and the finding itself "
                   "is not asserted — only that the click reached the engine")
+
+        # Autocomplete: typing asks the engine for the word at the caret, and a suggestion is selectable.
+        # The expected words come from the engine's own answer, never a hardcoded list, and the draft is
+        # read back through the entry's Text interface, which exposes the live value. Keystrokes arrive
+        # only through the X server, so this leg needs the app this suite started (GDK_BACKEND=x11) and an
+        # xdotool — both are preconditions, and their absence is a note, not a failure.
+        if started is None:
+            print("  note: autocomplete not exercised (an app was already running; it may not take X input)")
+        elif shutil.which("xdotool") is None:
+            print("  note: autocomplete not exercised (xdotool is not installed)")
+        else:
+            completions = []
+            try:
+                with urllib.request.urlopen(api + "/v2/complete?prefix=spec", timeout=5) as response:
+                    completions = json.load(response).get("words") or []
+            except Exception:
+                print("  note: autocomplete not exercised (no engine answer for /v2/complete)")
+            if completions:
+                entry = w.find("entry", "Text to check")
+                if entry is None:
+                    print("  note: autocomplete not exercised (no draft entry in the tree)")
+                else:
+                    import pyatspi as atspi_mod  # pyright: ignore[reportMissingImports] — system python only
+                    ext = entry.queryComponent().getExtents(atspi_mod.DESKTOP_COORDS)
+                    cx, cy = int(ext.x + ext.width / 2), int(ext.y + ext.height / 2)
+
+                    def type_text():
+                        subprocess.run(["xdotool", "mousemove", str(cx), str(cy), "click", "1"], check=False)
+                        time.sleep(0.4)
+                        subprocess.run(["xdotool", "key", "ctrl+a"], check=False)
+                        subprocess.run(["xdotool", "type", "--delay", "60", "the report is spec"], check=False)
+
+                    type_text()
+                    deadline = time.time() + 8
+                    while time.time() < deadline:
+                        probe = w.find("entry", "Text to check")
+                        if probe is not None and probe.queryText().getText(0, -1).endswith("spec"):
+                            break
+                        time.sleep(0.5)
+                    else:
+                        # Measured flake: the window was still moving when the coordinates were read, so the
+                        # click landed beside the draft and the keys went nowhere. One retry, same target.
+                        type_text()
+                        time.sleep(1.0)
+                    offered = []
+                    deadline = time.time() + 15
+                    while time.time() < deadline and len(offered) < min(8, len(completions)):
+                        time.sleep(0.5)
+                        offered = [b for b in w.names("button") if b in completions]
+                    check(bool(offered), f"typing offered the engine's completions: {offered[:4]}…")
+                    if offered:
+                        picked = completions[1] if len(completions) > 1 else completions[0]
+                        check(w.click("button", picked), f"a suggestion ({picked}) can be clicked")
+                        value = ""
+                        deadline = time.time() + 10
+                        while time.time() < deadline:
+                            live = w.find("entry", "Text to check")
+                            if live is None:
+                                break
+                            value = live.queryText().getText(0, -1)
+                            if value.endswith(picked):
+                                break
+                            time.sleep(0.4)
+                        check(value.endswith(picked),
+                              f"clicking it completed the word at the caret: …{value[-len(picked):]!r}")
 
         # An empty word must be ignored rather than written: the dictionary takes one word and refuses
         # a phrase, and the box has nothing in it.

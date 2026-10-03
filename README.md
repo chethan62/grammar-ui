@@ -167,10 +167,13 @@ a stub DOM cannot see — that clicking **Check** reaches the engine (its own ca
 holds whatever the draft contains) and that the window then draws the *seeded* mistake as a finding. That
 last assertion is about the word, not about "something appeared": the suite writes a known sentence into
 the app's saved draft before launch and puts your own draft back afterwards, because a suite that fails the
-moment someone's writing improves is worse than no suite. It needs a display and
-`pyatspi`, so it is not part of the CI gate: `make test` runs it too, and it skips there with the reason
-it skipped. On this desktop the interactions go through AT-SPI actions rather than synthesised input,
-because KWin implements no virtual-keyboard protocol and keystrokes never arrive.
+moment someone's writing improves is worse than no suite. It also *types* — this desktop's Wayland session
+takes no synthesised keystrokes, so the app is started on the X backend and the suite types through
+`xdotool` — and asserts the autocomplete end to end: typing offers the engine's own completions, and
+clicking one completes the word at the caret. It needs a display, `pyatspi`, and
+`xdotool`, so it is not part of the CI gate: `make test` runs it too, and it skips there with the reason
+it skipped. Clicks and navigation go through AT-SPI actions rather than synthesised input; only the typed
+text goes through `xdotool`, on the X backend — KWin's Wayland session takes no keystrokes any other way.
 
 **The live legs are opt-in**, through `GRAMMAR_LIVE=1`:
 
