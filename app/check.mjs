@@ -253,40 +253,77 @@ console.log("  app: the recheck seam throws until wired, then is the wired check
 // Settings threw `ReferenceError: ENGINE is not defined` instead of saying "No engine at …", which is the
 // one thing that branch exists to say. A green gate did not notice, because the gate never got there.
 //
-// So: run the module with a fetch that always fails and require that it reports the engine rather than
-// throwing. It has to be last, because it takes over globalThis.fetch.
+// So this block runs the *whole window* against a `fetch` that always fails: it imports app.js, which both
+// registers every listener and boots, then fires each handler and requires that each one reports its
+// failure rather than throwing. app.js had no coverage at all before this, and every assertion is on the
+// text the branch produced — not on "it did not throw" — so it proves the branch ran.
+//
+// It has to be last, because it takes over globals.
 {
   const recorded = {};
+  const listeners = new Map();
   const noop = () => {};
   const el = (id) => {
-    const b = { dataset: {}, selectedOptions: [], classList: { add: noop, remove: noop },
-      addEventListener: noop, setAttribute: noop, append: noop, appendChild: noop, replaceChildren: noop,
-      focus: noop, closest: () => null, value: "", hidden: false, disabled: false, className: "", children: [] };
+    const b = { id, dataset: {}, selectedOptions: [], classList: { add: noop, remove: noop },
+      addEventListener: (type, fn) => listeners.set(id + ":" + type, fn),
+      setAttribute: noop, append: noop, appendChild: noop, replaceChildren: noop, remove: noop,
+      focus: noop, setSelectionRange: noop, setRangeText: noop, closest: () => null,
+      value: "", hidden: false, disabled: false, className: "", children: [], selectionStart: 0 };
     Object.defineProperty(b, "textContent", { get: () => recorded[id], set: (v) => { recorded[id] = v; } });
     b.parentElement = b;
     return b;
   };
   const cache = new Map();
-  cache.set("draft", Object.assign(el("draft"), { value: "a draft, so the check reaches the engine" }));
+  // The draft comes from localStorage at boot (app.js reads it and assigns), so that is where to put it —
+  // seeding the element instead is overwritten the moment the entry is imported.
+  const store = new Map([["grammar-draft", "a draft, so a check and a rewrite reach the engine"]]);
   globalThis.document = { getElementById: (id) => cache.get(id) || (cache.set(id, el(id)), cache.get(id)),
-                          createElement: () => el("x"), addEventListener: noop, activeElement: null };
-  globalThis.window = { addEventListener: noop };
+                          createElement: () => el("x"), addEventListener: (t, fn) => listeners.set("document:" + t, fn),
+                          activeElement: null };
+  globalThis.window = { addEventListener: (t, fn) => listeners.set("window:" + t, fn) };
+  globalThis.localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null),
+                              setItem: (k, v) => store.set(k, String(v)),
+                              removeItem: (k) => store.delete(k) };
   globalThis.fetch = () => Promise.reject(new TypeError("fetch failed"));
-  const { load } = await import("./src/panels.js");
-  await load();                                  // must resolve and report, not throw
+
+  // Importing the entry registers the listeners and runs the boot, so a missing import anywhere in the
+  // wiring surfaces here as a ReferenceError rather than silently at someone's first click.
+  await import("./src/app.js");
   if (!/^No engine at http:\/\//.test(recorded.status || "")) {
-    throw new Error(`with the engine down the footer said ${JSON.stringify(recorded.status)} — it must name the engine it could not reach`);
+    throw new Error(`on boot with the engine down the footer said ${JSON.stringify(recorded.status)} — it must name the engine it could not reach`);
   }
   if (recorded.state !== "not answering") {
-    throw new Error(`with the engine down the status dot said ${JSON.stringify(recorded.state)}`);
+    throw new Error(`on boot with the engine down the status said ${JSON.stringify(recorded.state)}`);
   }
-  // The other module that has a failure branch: a check that cannot reach the engine reports it in the
-  // count line and stays quiet otherwise. Asserted on that text rather than on "it did not throw", so this
-  // proves the branch ran instead of assuming it.
+
+  // Every listener the wiring is supposed to install. A missing one is a control that does nothing.
+  const wired = ["tab-check:click", "provider:change", "add:click", "newWord:keydown",
+                 "document:selectionchange", "check:click", "fixall:click", "undo:click",
+                 "draft:input", "draft:keydown", "rewrite:click", "save:click", "window:focus"];
+  const unwired = wired.filter((k) => !listeners.has(k));
+  if (unwired.length) throw new Error(`nothing is listening for: ${unwired.join(", ")}`);
+
+  const fire = async (key, event = {}) => listeners.get(key)({
+    preventDefault: noop, target: { closest: () => null }, ...event });
+
+  for (const key of wired) await fire(key);            // none of these may throw
+  await fire("save:click");                            // the same handler, checked for what it said
+  if (!/^Could not save: /.test(recorded.status || "")) {
+    throw new Error(`a save that cannot reach the engine reported ${JSON.stringify(recorded.status)}`);
+  }
+  cache.get("newWord").value = "zzz";                  // a word to add, so addWord() reaches the engine
+  await fire("add:click");
+  if (!/^Could not add zzz: /.test(recorded.status || "")) {
+    throw new Error(`adding a word with no engine reported ${JSON.stringify(recorded.status)}`);
+  }
+  await fire("rewrite:click");
+  if (!/^Could not rewrite: /.test(recorded.rewriteState || "")) {
+    throw new Error(`a rewrite with no engine reported ${JSON.stringify(recorded.rewriteState)}`);
+  }
   const { check } = await import("./src/flow.js");
   await check();
   if (!/^Could not check: |^The engine did not answer/.test(recorded.found || "")) {
     throw new Error(`with the engine down a check reported ${JSON.stringify(recorded.found)} — the failure branch did not run`);
   }
-  console.log("  app: with no engine the window says so instead of throwing");
+  console.log(`  app: with no engine, all ${wired.length} listeners fire and each reports the failure`);
 }
