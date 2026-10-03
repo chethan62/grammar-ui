@@ -88,16 +88,23 @@ uninstall:
 # entry. Kept out of `install` on purpose — that one is Python and needs no toolchain, while this needs a
 # Rust build that a fresh checkout will not have.
 APPBIN = app/src-tauri/target/release/grammar
+# Where `Icon=grammar-ui` is looked for. It has to be written by this target: the launcher entry named an
+# icon that nothing installed, so the file in there was one an older hand-install had left behind and the
+# menu kept showing that design no matter what the repo held. An icon the build does not install is an icon
+# that silently drifts from the source.
+ICONTHEME = $(HOME)/.local/share/icons/hicolor
 
 install-app:
 	@test -x $(APPBIN) || { echo "not built yet — run: cd app && npm run tauri build -- --no-bundle"; exit 1; }
-	install -d $(BINDIR) $(APPDIR)
+	install -d $(BINDIR) $(APPDIR) $(ICONTHEME)/scalable/apps
 	install -m755 $(APPBIN) $(BINDIR)/grammar
 	sed 's|@BINDIR@|$(BINDIR)|' deployments/grammar.desktop > $(APPDIR)/grammar.desktop
 	chmod 644 $(APPDIR)/grammar.desktop
+	install -m644 app/src-tauri/icons/icon.svg $(ICONTHEME)/scalable/apps/grammar-ui.svg
 	-update-desktop-database $(APPDIR) 2>/dev/null
-	@echo "Installed $(BINDIR)/grammar — it appears in the menu as \"Grammar\"."
+	-gtk-update-icon-cache -f -t $(ICONTHEME) 2>/dev/null
+	@echo "Installed $(BINDIR)/grammar and its icon — it appears in the menu as \"Grammar\"."
 
 uninstall-app:
-	rm -f $(BINDIR)/grammar $(APPDIR)/grammar.desktop
+	rm -f $(BINDIR)/grammar $(APPDIR)/grammar.desktop $(ICONTHEME)/scalable/apps/grammar-ui.svg
 	-update-desktop-database $(APPDIR) 2>/dev/null
