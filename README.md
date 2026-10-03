@@ -98,6 +98,31 @@ journalctl --user -fu grammar-watch           # what it is doing (GRAMMAR_WATCH_
 
 `make uninstall` reverses it. No unit ever references a checkout.
 
+## Artifacts
+
+| What | How | Carries |
+| --- | --- | --- |
+| `make dist` | one 2.3 MB `.tar.gz` | the window, the four clients, the icon, the entries, the watcher unit |
+| AppImage | `npm run tauri build` in `app/` | the window alone, as one file |
+| `.deb` / `.rpm` | the same command | the window alone, for those package managers |
+
+The tarball is the one that needs nothing: it is a `~/.local`-shaped tree, so
+
+```bash
+tar -C ~/.local -xf dist/grammar-ui-<version>-x86_64.tar.gz --strip-components=1
+```
+
+is the whole install. None of the three is self-sufficient: they all talk to the engine, which is a
+separate project (`grammar-server`), and the window needs the host's `webkit2gtk-4.1` and GTK3. Flatpak is
+deliberately not offered — its sandbox cannot read another application's selection, which is the entire
+point of `grammar --lookup`.
+
+One local snag, measured: Tauri runs `linuxdeploy --plugin gtk`, and that plugin searches `/usr/lib`
+recursively — so a package that ships its own library copies under `/usr/lib/<name>/` (here `openshot-bin`)
+is found before the system's, fails to resolve, and takes the AppImage step down while `.deb` and `.rpm`
+succeed. Running `linuxdeploy` without `--plugin gtk` finishes the AppImage; a clean machine has no such
+copy.
+
 ## How it is checked
 
 Four gates, all of them the scripts' own assertions — `make test` is the same thing CI runs.

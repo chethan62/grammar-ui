@@ -119,3 +119,40 @@ install-app:
 uninstall-app:
 	rm -f $(BINDIR)/grammar $(APPDIR)/grammar.desktop $(ICONTHEME)/scalable/apps/grammar-ui.svg
 	-update-desktop-database $(APPDIR) 2>/dev/null
+
+# A universal artifact: everything `make install` and `make install-app` put on this machine, as one
+# archive, in a ~/.local-shaped tree — so extracting it into ~/.local IS the install. No root, no package
+# manager, nothing distro-specific. It carries the window and the clients, NOT the engine: grammar-server
+# is a separate project with its own install, and the clients need it running.
+DISTVER := $(shell python3 -c "import json;print(json.load(open('app/src-tauri/tauri.conf.json'))['version'])" 2>/dev/null || echo 0.0.0)
+DISTNAME := grammar-ui-$(DISTVER)-x86_64
+DISTDIR := dist/$(DISTNAME)
+
+dist: $(APPBIN)
+	@rm -rf $(DISTDIR)
+	@mkdir -p $(DISTDIR)/bin $(DISTDIR)/share/applications $(DISTDIR)/share/icons/hicolor/scalable/apps
+	install -m755 $(APPBIN) $(DISTDIR)/bin/grammar
+	install -m755 desktop/grammar-lookup.py $(DISTDIR)/bin/grammar-lookup
+	install -m755 desktop/grammar-watch.py $(DISTDIR)/bin/grammar-watch
+	install -m755 desktop/grammar-doctor.py $(DISTDIR)/bin/grammar-doctor
+	install -m755 desktop/grammar-pause.py $(DISTDIR)/bin/grammar-pause
+	install -m644 desktop/grammar_core.py $(DISTDIR)/bin/grammar_core.py
+	install -m644 app/src-tauri/icons/icon.svg $(DISTDIR)/share/icons/hicolor/scalable/apps/grammar-ui.svg
+	install -m644 deployments/systemd/grammar-watch.service $(DISTDIR)/grammar-watch.service
+# `Exec=grammar`, not a home-absolute path: the archive is extracted into ~/.local, whose bin is on PATH,
+# and an absolute path baked in here would be wrong for every other person who unpacks it.
+	sed 's|@BINDIR@/||' deployments/grammar.desktop > $(DISTDIR)/share/applications/grammar.desktop
+	sed 's|@BINDIR@/||' deployments/grammar-lookup.desktop > $(DISTDIR)/share/applications/grammar-lookup.desktop
+	@printf '%s\n' \
+	  "grammar-ui $(DISTVER) — the window and the clients, x86_64 Linux" "" \
+	  "Extract into ~/.local; no root, no package manager:" "" \
+	  "    tar -C ~/.local -xf $(DISTNAME).tar.gz --strip-components=1" "" \
+	  "Suggestions as you type, if you want them:" "" \
+	  "    install -Dm644 grammar-watch.service ~/.config/systemd/user/grammar-watch.service" \
+	  "    systemctl --user enable --now grammar-watch" "" \
+	  "Needs: webkit2gtk-4.1, GTK3, python3, and the engine (grammar-server) running on 127.0.0.1:8875." \
+	  "The engine is a separate project and is not in this archive." \
+	  > $(DISTDIR)/INSTALL
+	@cd dist && tar czf $(DISTNAME).tar.gz $(DISTNAME)
+	@echo "Built dist/$(DISTNAME).tar.gz — $$(du -h dist/$(DISTNAME).tar.gz | cut -f1)"
+	@find $(DISTDIR) -type f | sort | sed 's|$(DISTDIR)|  |'
