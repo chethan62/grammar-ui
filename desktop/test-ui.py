@@ -284,6 +284,15 @@ def main():
         skip("the app is on the bus but its window never drew the tabs")
 
     try:
+        if os.environ.get("GRAMMAR_E2E_DEBUG"):
+            # Dump every role/name pair: a role vocabulary change (WebKitGTK version, AT-SPI registry)
+            # makes controls "missing" when they are present under another role — the tree itself is the
+            # only witness, and this is how the CI job can show it without a human at a screen.
+            for n in w.nodes():
+                try:
+                    print(f"  tree: {n.getRoleName()} {n.name!r}")
+                except Exception:
+                    pass
         check(w.names("page tab") == ["Check", "Rewrite", "Settings"],
               f"the window offers the three tabs: {w.names('page tab')}")
 
