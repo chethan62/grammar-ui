@@ -68,7 +68,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version: "1.27"
       - name: display and a11y stack
         run: |
           sudo apt-get update
@@ -77,8 +77,8 @@ jobs:
       - name: the engine beside its harper pair
         run: |
           mkdir -p /tmp/engine
-          curl -fsSL https://github.com/Automattic/harper/releases/download/v2.11.0/harper-ls-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C /tmp/engine
-          curl -fsSL https://github.com/Automattic/harper/releases/download/v2.11.0/harper-cli-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C /tmp/engine
+          curl -fsSL https://github.com/Automattic/harper/releases/download/v2.12.0/harper-ls-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C /tmp/engine
+          curl -fsSL https://github.com/Automattic/harper/releases/download/v2.12.0/harper-cli-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C /tmp/engine
           git clone --depth 1 https://github.com/chethan62/grammar-server /tmp/engine/src
           cd /tmp/engine/src && go build -o /tmp/engine/grammar-server ./cmd/server
           ls -la /tmp/engine
