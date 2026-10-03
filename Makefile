@@ -8,7 +8,9 @@ APPDIR ?= $(HOME)/.local/share/applications
 # of five: the entries' Icon=grammar-ui resolves to this.
 ICONDIR ?= $(HOME)/.local/share/icons/hicolor/scalable/apps
 
-.PHONY: all test check-ui install uninstall
+# `dist` is in here because there is a dist/ directory: without it Make reads the target as a file that
+# already exists and skips the recipe entirely ("make: 'dist' is up to date").
+.PHONY: all test check-ui install uninstall dist uninstall-app
 
 all:
 	@echo "Nothing to build. Try: make test | make install"
@@ -120,17 +122,22 @@ uninstall-app:
 	rm -f $(BINDIR)/grammar $(APPDIR)/grammar.desktop $(ICONTHEME)/scalable/apps/grammar-ui.svg
 	-update-desktop-database $(APPDIR) 2>/dev/null
 
-# A universal artifact: everything `make install` and `make install-app` put on this machine, as one
-# archive, in a ~/.local-shaped tree — so extracting it into ~/.local IS the install. No root, no package
-# manager, nothing distro-specific. It carries the window and the clients, NOT the engine: grammar-server
-# is a separate project with its own install, and the clients need it running.
+# One package for the whole thing: the engine (with the harper pair it runs), the window and the clients,
+# as a ~/.local-shaped tree — so extracting it into ~/.local IS the install. No root, no package manager,
+# nothing distro-specific.
+#
+# The engine half is not re-packed here: `make -C $(ENGINE_REPO) package` in grammar-server already builds
+# it with harper-ls/harper-cli beside the binary and both licences, and that is the archive whose layout is
+# tested there. This target unpacks it into the tree and adds the desktop half.
+ENGINE_REPO ?= ../grammar-server
+ENGINE_VER := $(shell git -C $(ENGINE_REPO) describe --tags --always 2>/dev/null | sed 's/^v//')
 DISTVER := $(shell python3 -c "import json;print(json.load(open('app/src-tauri/tauri.conf.json'))['version'])" 2>/dev/null || echo 0.0.0)
-DISTNAME := grammar-ui-$(DISTVER)-x86_64
+DISTNAME := grammar-$(or $(ENGINE_VER),$(DISTVER))-x86_64
 DISTDIR := dist/$(DISTNAME)
 
 dist: $(APPBIN)
 	@rm -rf $(DISTDIR)
-	@mkdir -p $(DISTDIR)/bin $(DISTDIR)/share/applications $(DISTDIR)/share/icons/hicolor/scalable/apps
+	@mkdir -p $(DISTDIR)/bin $(DISTDIR)/share/applications $(DISTDIR)/share/icons/hicolor/scalable/apps $(DISTDIR)/share/doc/grammar-server
 	install -m755 $(APPBIN) $(DISTDIR)/bin/grammar
 	install -m755 desktop/grammar-lookup.py $(DISTDIR)/bin/grammar-lookup
 	install -m755 desktop/grammar-watch.py $(DISTDIR)/bin/grammar-watch
@@ -138,20 +145,34 @@ dist: $(APPBIN)
 	install -m755 desktop/grammar-pause.py $(DISTDIR)/bin/grammar-pause
 	install -m644 desktop/grammar_core.py $(DISTDIR)/bin/grammar_core.py
 	install -m644 app/src-tauri/icons/icon.svg $(DISTDIR)/share/icons/hicolor/scalable/apps/grammar-ui.svg
-	install -m644 deployments/systemd/grammar-watch.service $(DISTDIR)/grammar-watch.service
 # `Exec=grammar`, not a home-absolute path: the archive is extracted into ~/.local, whose bin is on PATH,
 # and an absolute path baked in here would be wrong for every other person who unpacks it.
 	sed 's|@BINDIR@/||' deployments/grammar.desktop > $(DISTDIR)/share/applications/grammar.desktop
 	sed 's|@BINDIR@/||' deployments/grammar-lookup.desktop > $(DISTDIR)/share/applications/grammar-lookup.desktop
+	install -m644 deployments/systemd/grammar-watch.service $(DISTDIR)/grammar-watch.service
+	[ -f LICENSE ] && install -m644 LICENSE $(DISTDIR)/LICENSE-grammar-ui || true
+# The engine's own archive, unpacked into this tree: its binaries go to bin/ (harper beside grammar-server,
+# which is where resolveHarper looks first), its unit to the root with ours, its licences to the root —
+# those have to travel with the harper binaries — and its README to share/doc, where it describes the engine
+# rather than this package.
+	$(MAKE) -C $(ENGINE_REPO) package >/dev/null
+	tar -xzf $$(ls -t $(ENGINE_REPO)/dist/grammar-server-*.tar.gz | head -1) -C $(DISTDIR) --strip-components=1
+	mv $(DISTDIR)/grammar-server $(DISTDIR)/harper-ls $(DISTDIR)/harper-cli $(DISTDIR)/bin/
+	mv $(DISTDIR)/deployments/systemd/grammar-server.service $(DISTDIR)/
+	mv $(DISTDIR)/README.md $(DISTDIR)/share/doc/grammar-server/README.md
+	rm -rf $(DISTDIR)/deployments
 	@printf '%s\n' \
-	  "grammar-ui $(DISTVER) — the window and the clients, x86_64 Linux" "" \
+	  "grammar $(ENGINE_VER) — engine, window and clients; grammar-ui $(DISTVER); x86_64 Linux" "" \
 	  "Extract into ~/.local; no root, no package manager:" "" \
 	  "    tar -C ~/.local -xf $(DISTNAME).tar.gz --strip-components=1" "" \
-	  "Suggestions as you type, if you want them:" "" \
+	  "Start the engine, then the typo watcher:" "" \
+	  "    install -Dm644 grammar-server.service ~/.config/systemd/user/grammar-server.service" \
 	  "    install -Dm644 grammar-watch.service ~/.config/systemd/user/grammar-watch.service" \
-	  "    systemctl --user enable --now grammar-watch" "" \
-	  "Needs: webkit2gtk-4.1, GTK3, python3, and the engine (grammar-server) running on 127.0.0.1:8875." \
-	  "The engine is a separate project and is not in this archive." \
+	  "    systemctl --user daemon-reload" \
+	  "    systemctl --user enable --now grammar-server grammar-watch" "" \
+	  "The window: \`grammar\` (menu entry: Grammar). Check a selection: \`grammar --lookup\`, Ctrl+Alt+C." "" \
+	  "The window needs webkit2gtk-4.1 and GTK3 from the host; the engine and harper need nothing else," \
+	  "and harper-ls sits beside grammar-server in bin/ where it is looked for first." \
 	  > $(DISTDIR)/INSTALL
 	@cd dist && tar czf $(DISTNAME).tar.gz $(DISTNAME)
 	@echo "Built dist/$(DISTNAME).tar.gz — $$(du -h dist/$(DISTNAME).tar.gz | cut -f1)"

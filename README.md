@@ -102,20 +102,27 @@ journalctl --user -fu grammar-watch           # what it is doing (GRAMMAR_WATCH_
 
 | What | How | Carries |
 | --- | --- | --- |
-| `make dist` | one 2.3 MB `.tar.gz` | the window, the four clients, the icon, the entries, the watcher unit |
+| `make dist` | one 32 MB `.tar.gz` | the engine, harper-ls/harper-cli, the window, the four clients, both units, the entries, the icon |
 | AppImage | `npm run tauri build` in `app/` | the window alone, as one file |
 | `.deb` / `.rpm` | the same command | the window alone, for those package managers |
 
-The tarball is the one that needs nothing: it is a `~/.local`-shaped tree, so
+`make dist` is the whole product in one archive — the only artifact that needs nothing but the host's
+`webkit2gtk-4.1` and GTK3. It is a `~/.local`-shaped tree, so
 
 ```bash
-tar -C ~/.local -xf dist/grammar-ui-<version>-x86_64.tar.gz --strip-components=1
+tar -C ~/.local -xf dist/grammar-<version>-x86_64.tar.gz --strip-components=1
 ```
 
-is the whole install. None of the three is self-sufficient: they all talk to the engine, which is a
-separate project (`grammar-server`), and the window needs the host's `webkit2gtk-4.1` and GTK3. Flatpak is
-deliberately not offered — its sandbox cannot read another application's selection, which is the entire
-point of `grammar --lookup`.
+is the whole install, then the two units as INSTALL says. Verified by extracting it elsewhere and running
+the engine out of it: `/status` reports its version and a real check finds `teh`, with nothing installed.
+
+The engine half is not re-packed here: `make -C ../grammar-server package` builds the archive that already
+carries harper-ls beside the binary, and this target unpacks that into the tree. Point `ENGINE_REPO=` at
+wherever that checkout lives.
+
+The AppImage carries the desktop half alone, and still needs the engine running. Flatpak is deliberately
+not offered: its sandbox cannot read another application's selection, which is the entire point of
+`grammar --lookup`.
 
 One local snag, measured: Tauri runs `linuxdeploy --plugin gtk`, and that plugin searches `/usr/lib`
 recursively — so a package that ships its own library copies under `/usr/lib/<name>/` (here `openshot-bin`)
