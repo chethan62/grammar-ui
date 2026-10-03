@@ -45,6 +45,9 @@ export async function rewrite() {
   }
 }
 
+// The words harper itself accepts. No remove control: the dictionary endpoint only appends (harper reads
+// the file at startup), and a button that cannot act teaches a reader nothing. The note under the list
+// names the file where a word comes back out.
 export function rows(words) {
   return words.map((word) => {
     const div = document.createElement("div");
@@ -52,42 +55,27 @@ export function rows(words) {
     const label = document.createElement("span");
     label.className = "word";
     label.textContent = word;                       // the user's words, never innerHTML
-    const button = document.createElement("button");
-    button.className = "flat";
-    button.textContent = "Allow " + word;           // named for what it does *to what*
-    button.addEventListener("click", async () => {
-      button.disabled = true;
-      try {
-        await call("/v2/ignore", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ word, forget: true }),
-        });
-        await load();
-        say("Stopped ignoring " + word + ".");
-      } catch (error) {
-        button.disabled = false;
-        say("Could not remove " + word + ": " + error.message, true);
-      }
-    });
-    div.append(label, button);
+    div.append(label);
     return div;
   });
 }
 
 export async function load() {
   try {
-    const [ignored, ai, langs, status, pause] = await Promise.all([
-      call("/v2/ignore"), call("/v1/ai"), call("/v2/languages"), call("/status"), call("/v2/pause"),
+    const [dictionary, ai, langs, status, pause] = await Promise.all([
+      call("/v2/dictionary"), call("/v1/ai"), call("/v2/languages"), call("/status"), call("/v2/pause"),
     ]);
     // The rows need to know whether a model is configured: a style finding harper cannot rewrite gets a
     // "Rephrase" button when there is one and no button at all when there is not. "none" is the engine's
     // own word for off, and a null provider means the engine never answered.
     state.provider = ai.provider || null;
-    const words = ignored.words || [];
+    const words = dictionary.words || [];
     $("words").replaceChildren(...rows(words));
+    // The path is the way back out, which matters because the list has no remove control: this names a
+    // file, not a mechanism, so it is the one thing that makes the absence of a button honest.
     $("wordsNote").textContent = words.length
-      ? "The engine stops reporting these; removing one brings the findings back."
-      : "Nothing is ignored yet.";
+      ? "harper accepts these in every editor. To remove one, edit " + (dictionary.path || "the dictionary file") + "."
+      : "Nothing added yet — a word here is accepted by harper itself, in every editor.";
 
     // Pause status (read-only, owned by grammar-watch/grammar-pause)
     if (pause.paused) {
@@ -196,13 +184,19 @@ export async function addWord() {
   if (!word) return;
   $("add").disabled = true;
   try {
-    await call("/v2/ignore", {
+    // The same endpoint the row's "Add to dictionary" uses, so one intent has one scope: a word added
+    // here is accepted by harper itself, everywhere, not silenced inside this engine alone.
+    const answer = await call("/v2/dictionary", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ word }),
     });
     $("newWord").value = "";
     await load();
-    say("Now ignoring " + word + ".");
+    // The endpoint checks its own effect and says so, so this reports what happened rather than what was
+    // attempted — the row button's rule, kept identical here because it is the same operation.
+    say(answer.accepted
+      ? "The checker now accepts " + word + ", in every editor."
+      : "Saved " + word + ", but the checker still flags it — see " + answer.path, !answer.accepted);
   } catch (error) {
     say("Could not add " + word + ": " + error.message, true);
   } finally {

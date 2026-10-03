@@ -284,7 +284,10 @@ console.log("  app: the recheck seam throws until wired, then is the wired check
   globalThis.localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null),
                               setItem: (k, v) => store.set(k, String(v)),
                               removeItem: (k) => store.delete(k) };
-  globalThis.fetch = () => Promise.reject(new TypeError("fetch failed"));
+  // The URL is recorded as well as failed. Which endpoint a control reaches is exactly what can be wrong
+  // silently: two paths for one intent, one teaching harper and one silencing this engine alone.
+  const requested = [];
+  globalThis.fetch = (url) => { requested.push(String(url)); return Promise.reject(new TypeError("fetch failed")); };
 
   // Importing the entry registers the listeners and runs the boot, so a missing import anywhere in the
   // wiring surfaces here as a ReferenceError rather than silently at someone's first click.
@@ -315,6 +318,13 @@ console.log("  app: the recheck seam throws until wired, then is the wired check
   await fire("add:click");
   if (!/^Could not add zzz: /.test(recorded.status || "")) {
     throw new Error(`adding a word with no engine reported ${JSON.stringify(recorded.status)}`);
+  }
+  // Which endpoint it reached, which the message alone cannot tell: the row's button and this box are the
+  // same intent, so both must teach harper itself (/v2/dictionary) rather than silence this engine alone
+  // (/v2/ignore). The two scopes differ — one word is accepted in every editor, the other only here.
+  if (!(requested.at(-1) || "").endsWith("/v2/dictionary")) {
+    throw new Error(`adding a word from the panel asked ${JSON.stringify(requested.at(-1))} — it must be ` +
+      `/v2/dictionary, the dictionary harper itself reads, not the engine-only ignore list`);
   }
   await fire("rewrite:click");
   if (!/^Could not rewrite: /.test(recorded.rewriteState || "")) {
