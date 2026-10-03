@@ -45,9 +45,10 @@ export async function rewrite() {
   }
 }
 
-// The words harper itself accepts. No remove control: the dictionary endpoint only appends (harper reads
-// the file at startup), and a button that cannot act teaches a reader nothing. The note under the list
-// names the file where a word comes back out.
+// The words harper itself accepts, each with the way back out. The endpoint takes a word out again
+// (DELETE /v2/dictionary?word=…) and restarts harper-ls, so this control does what it says — and it is on
+// every row rather than revealed on hover, because an action a reader has to go looking for is one they
+// will not find.
 export function rows(words) {
   return words.map((word) => {
     const div = document.createElement("div");
@@ -55,7 +56,11 @@ export function rows(words) {
     const label = document.createElement("span");
     label.className = "word";
     label.textContent = word;                       // the user's words, never innerHTML
-    div.append(label);
+    const remove = document.createElement("button");
+    remove.className = "flat";
+    remove.textContent = "Remove";
+    remove.addEventListener("click", () => removeWord(word));
+    div.append(label, remove);
     return div;
   });
 }
@@ -71,10 +76,8 @@ export async function load() {
     state.provider = ai.provider || null;
     const words = dictionary.words || [];
     $("words").replaceChildren(...rows(words));
-    // The path is the way back out, which matters because the list has no remove control: this names a
-    // file, not a mechanism, so it is the one thing that makes the absence of a button honest.
     $("wordsNote").textContent = words.length
-      ? "harper accepts these in every editor. To remove one, edit " + (dictionary.path || "the dictionary file") + "."
+      ? "harper accepts these in every editor. Remove takes one back out."
       : "Nothing added yet — a word here is accepted by harper itself, in every editor.";
 
     // Pause status (read-only, owned by grammar-watch/grammar-pause)
@@ -201,5 +204,25 @@ export async function addWord() {
     say("Could not add " + word + ": " + error.message, true);
   } finally {
     $("add").disabled = false;
+  }
+}
+
+// Taking a word back out, through the endpoint that can. The engine measures the result, so this reports
+// what happened rather than what was attempted — and the three outcomes are genuinely different: removed
+// and the checker flags it again, removed but harper knows the word on its own (a common English word needs
+// no list), or it was not there to begin with.
+export async function removeWord(word) {
+  try {
+    const answer = await call("/v2/dictionary?word=" + encodeURIComponent(word), { method: "DELETE" });
+    await load();
+    if (!answer.removed) {
+      say(word + " was not in the list.", true);
+    } else if (answer.accepted) {
+      say("Took " + word + " out of the list; the checker still accepts it on its own.");
+    } else {
+      say("The checker flags " + word + " again.");
+    }
+  } catch (error) {
+    say("Could not remove " + word + ": " + error.message, true);
   }
 }

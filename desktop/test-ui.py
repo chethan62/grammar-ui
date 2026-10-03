@@ -43,6 +43,15 @@ def check(ok, message):
     return ok
 
 
+def engine_words(api):
+    """The words harper accepts, straight from the engine: the panel's list is a rendering of this answer."""
+    try:
+        with urllib.request.urlopen(api + "/v2/dictionary", timeout=5) as response:
+            return json.load(response).get("words") or []
+    except Exception:
+        return None
+
+
 def engine_counters(api):
     """The engine's cache counters, used as a change detector: a check that really reached it moves them."""
     try:
@@ -294,6 +303,18 @@ def main():
         # Read-only settings the app only reports: if these vanish, the panel lost a section.
         for role, name in (("combo box", "Runner"), ("combo box", "Dialect"), ("button", "Save")):
             check(w.find(role, name) is not None, f"Settings: {role} {name!r} is present")
+
+        # Every accepted word carries the way back out. The list is a rendering of the engine's own answer,
+        # so the controls are counted against that answer rather than merely found: a row without a Remove is
+        # a word that can only be added, which is the state this feature exists to end. An engine that does
+        # not answer means no question — a missing live precondition is a skip, never a failure.
+        words = engine_words(api)
+        if words is None:
+            print("  skip the Remove controls: the engine did not answer /v2/dictionary")
+        else:
+            removes = w.names("button").count("Remove")
+            check(removes == len(words),
+                  f"Settings: {len(words)} accepted word(s), {removes} Remove control(s) drawn")
     finally:
         if started is not None:
             started.terminate()
