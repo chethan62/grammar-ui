@@ -100,12 +100,27 @@ journalctl --user -fu grammar-watch           # what it is doing (GRAMMAR_WATCH_
 
 ## How it is checked
 
-Three gates, all of them the scripts' own assertions — `make test` is the same thing CI runs.
+Four gates, all of them the scripts' own assertions — `make test` is the same thing CI runs.
 
 ```bash
 python3 desktop/test-lookup.py        # fix logic, dialog contract, live engine
 python3 desktop/test-watch.py         # sentence window, answer routing, listeners, the pause list
 ```
+
+The window itself is checked twice, at two levels:
+
+```bash
+make check-ui                         # drives the real window: clicks, navigation, the engine round-trip
+node app/check.mjs                    # the JS modules against a stub DOM (part of `make test`)
+```
+
+`make check-ui` starts an app, clicks each tab and the buttons, and stops it again. It asserts the three
+panels are really exclusive — a control from another tab on screen is a navigation bug, and the one thing
+a stub DOM cannot see — that clicking **Check** reaches the engine (its own cache counters move, which
+holds whatever the draft contains) and that the window then draws the finding. It needs a display and
+`pyatspi`, so it is not part of the CI gate: `make test` runs it too, and it skips there with the reason
+it skipped. On this desktop the interactions go through AT-SPI actions rather than synthesised input,
+because KWin implements no virtual-keyboard protocol and keystrokes never arrive.
 
 **The live legs are opt-in**, through `GRAMMAR_LIVE=1`:
 

@@ -8,7 +8,7 @@ APPDIR ?= $(HOME)/.local/share/applications
 # of five: the entries' Icon=grammar-ui resolves to this.
 ICONDIR ?= $(HOME)/.local/share/icons/hicolor/scalable/apps
 
-.PHONY: all test install uninstall
+.PHONY: all test check-ui install uninstall
 
 all:
 	@echo "Nothing to build. Try: make test | make install"
@@ -17,6 +17,14 @@ test: check-app
 	python3 desktop/test-lookup.py
 	python3 desktop/test-watch.py
 	python3 desktop/test-doctor.py
+	@/usr/bin/python3 desktop/test-ui.py          # skips unless an app is on the bus; see check-ui
+
+# The end-to-end UI test, driven for real: it clicks the tabs and buttons of the running window and reads
+# what the window reports. It needs a display and an app, so this starts one, drives it, and stops it.
+# /usr/bin/python3 on purpose, like the watcher unit: pyatspi lives in the system python, and a venv
+# python would skip the whole suite instead of running it.
+check-ui:
+	@/usr/bin/python3 desktop/test-ui.py --start
 
 # The app's own check. It parses the JS, then asks the engine for the two endpoints the UI calls: a
 # renamed or removed endpoint leaves a window that says "not answering" and nothing else, and that is
