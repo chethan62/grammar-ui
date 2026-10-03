@@ -31,6 +31,12 @@ $("provider").addEventListener("change", () => {
 });
 
 $("add").addEventListener("click", addWord);
+// The completion's keydown is wired BEFORE the Enter-to-add one on purpose: listeners run in registration
+// order and preventDefault does not stop a sibling listener, so this order is what makes Enter on a
+// highlighted suggestion take the word and then add it — the other order reads the box before it is filled
+// and adds the partial prefix instead. Measured: the dictionary gained "spec" from Entering "specular".
+const addWords = wireCompletion({ input: $("newWord"), box: $("addWords") });
+$("newWord").addEventListener("input", () => addWords.suggest());
 $("newWord").addEventListener("keydown", (event) => { if (event.key === "Enter") addWord(); });
 
 // The caret moves without an edit, so the strip follows it: selectionchange covers the keyboard, the
@@ -55,7 +61,6 @@ $("undo").addEventListener("click", async () => {
 const draftWords = wireCompletion({
   input: $("draft"), box: $("draftWords"), caret: true, after: () => recheck(),
 });
-const addWords = wireCompletion({ input: $("newWord"), box: $("addWords") });
 
 $("draft").addEventListener("input", () => {
   // An edit after Fix all makes the kept copy the wrong thing to go back to, so Undo goes with it.
@@ -63,7 +68,6 @@ $("draft").addEventListener("input", () => {
   saveDraft(); liveCheck();
   draftWords.suggest();
 });
-$("newWord").addEventListener("input", () => addWords.suggest());
 // Ctrl+Enter checks, matching the add field that submits on Enter — and it must not swallow plain Enter,
 // which inserts a newline in a textarea.
 $("draft").addEventListener("keydown", (event) => {
