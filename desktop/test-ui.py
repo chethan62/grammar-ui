@@ -78,6 +78,9 @@ def draft_read(path):
     try:
         row = conn.execute("select value from ItemTable where key = 'grammar-draft'").fetchone()
         return row[0] if row else None
+    except sqlite3.OperationalError:
+        # A store that was never written has no ItemTable: that is "no draft", not a broken store.
+        return None
     finally:
         conn.close()
 
@@ -85,6 +88,10 @@ def draft_read(path):
 def draft_write(path, value):
     conn = sqlite3.connect(path)
     try:
+        # WebKit's own schema, byte for byte — it drops a table whose definition differs and rebuilds it
+        # empty, so a hand-made store must match. A fresh file (CI) has no table at all.
+        conn.execute("create table if not exists ItemTable "
+                     "(key text unique on conflict replace, value blob not null on conflict fail)")
         if value is None:
             conn.execute("delete from ItemTable where key = 'grammar-draft'")
         else:
@@ -226,7 +233,39 @@ def main():
         # Seed a known draft while nothing has the file open — a running webview would write its own copy
         # back over it — then put the user's own draft back once the app is stopped. Every origin is seeded
         # because the dev server and the release build name their storage differently.
-        for db in draft_dbs():
+        dbs = draft_dbs()
+        if not dbs and started is None and args.start:
+            # A machine that has never run the app (CI) has no store, and hand-crafting one does not work:
+            # the webview drops a table it did not create (measured — a schema-identical hand-made store
+            # was emptied within a second of launch). So the app is run once to build its own store — it
+            # only writes one on the first input, so a single character is typed — then stopped, and only
+            # then is the real store seeded.
+            probe = subprocess.Popen([args.binary], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                     start_new_session=True,
+                                     env={**os.environ, "GDK_BACKEND": "x11"})
+            deadline = time.time() + args.wait
+            while time.time() < deadline and w._find_app() is None:
+                time.sleep(0.7)
+            probe_win = Window()
+            if probe_win.ready(seconds=15):
+                entry = probe_win.find("entry", "Text to check")
+                if entry is not None:
+                    import pyatspi as atspi_mod  # pyright: ignore[reportMissingImports]
+                    ext = entry.queryComponent().getExtents(atspi_mod.DESKTOP_COORDS)
+                    cx, cy = int(ext.x + ext.width / 2), int(ext.y + ext.height / 2)
+                    subprocess.run(["xdotool", "mousemove", str(cx), str(cy), "click", "1"], check=False)
+                    time.sleep(0.3)
+                    subprocess.run(["xdotool", "type", "--delay", "60", "x"], check=False)
+                    time.sleep(0.8)
+            probe.terminate()
+            try:
+                probe.wait(timeout=10)
+            except Exception:
+                probe.kill()
+            dbs = draft_dbs()
+            if dbs:
+                print(f"  note: no draft store existed; the app made one, so it was seeded from that")
+        for db in dbs:
             try:
                 seeded[db] = draft_read(db)
                 draft_write(db, SEED.encode("utf-16-le"))
