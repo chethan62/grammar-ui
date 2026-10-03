@@ -12,9 +12,9 @@
       {
         "title": "Grammar settings",
         "width": 460,
-        "height": 640,
+        "height": 500,
         "minWidth": 420,
-        "minHeight": 420,
+        "minHeight": 380,
         "resizable": true
       }
     ],
