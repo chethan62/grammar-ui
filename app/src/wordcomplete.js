@@ -24,8 +24,9 @@ export function accept(input, typed, word) {
 
 export function wireCompletion({ input, box, caret, after }) {
   let asked = "";                              // the last prefix sent: the same prefix is not a new question
+  let selectedIndex = -1;                      // -1 = nothing highlighted
 
-  const clear = () => { box.replaceChildren(); asked = ""; };
+  const clear = () => { box.replaceChildren(); asked = ""; selectedIndex = -1; };
 
   const token = () => {
     if (!caret) return input.value.trim();
@@ -33,12 +34,15 @@ export function wireCompletion({ input, box, caret, after }) {
     return found ? found[0] : "";
   };
 
+  const highlight = (idx) => {
+    const buttons = box.querySelectorAll("button");
+    buttons.forEach((btn, i) => btn.classList.toggle("selected", i === idx));
+  };
+
   const take = (word) => {
     if (caret) {
-      accept(input, token(), word);            // the token is read now, not when the list was built
+      accept(input, token(), word);
     } else {
-      // The box holds one word, so a click fills it in rather than adding it: what is about to be added
-      // stays visible, and Add is still the only thing that writes.
       input.value = word;
       input.focus();
     }
@@ -48,8 +52,6 @@ export function wireCompletion({ input, box, caret, after }) {
 
   const suggest = async () => {
     const typed = token();
-    // One letter is the alphabet. The engine answers that with an empty list too, and not asking is cheaper
-    // than asking and being told.
     if (typed.length < 2) { clear(); return; }
     if (typed === asked) return;
     asked = typed;
@@ -57,18 +59,46 @@ export function wireCompletion({ input, box, caret, after }) {
     try {
       answer = await call("/v2/complete?prefix=" + encodeURIComponent(typed.toLowerCase()));
     } catch {
-      clear();                                 // no engine, no suggestions — the footer already says why
+      clear();
       return;
     }
-    if (asked !== typed) return;               // an answer about a word that has since been replaced
-    box.replaceChildren(...(answer.words || []).map((word) => {
+    if (asked !== typed) return;
+    selectedIndex = -1;
+    box.replaceChildren(...(answer.words || []).map((word, i) => {
       const button = document.createElement("button");
       button.className = "flat";
-      button.textContent = word;               // the engine's words, never innerHTML
+      button.textContent = word;
       button.addEventListener("click", () => take(word));
       return button;
     }));
   };
+
+  // Keyboard: Up/Down moves, Enter/Tab accepts, Escape dismisses. The input owns the keydown so the list
+  // doesn't need focus (which would steal the caret).
+  input.addEventListener("keydown", (e) => {
+    const buttons = box.querySelectorAll("button");
+    if (!buttons.length) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      selectedIndex = (selectedIndex + 1) % buttons.length;
+      highlight(selectedIndex);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      selectedIndex = (selectedIndex - 1 + buttons.length) % buttons.length;
+      highlight(selectedIndex);
+    } else if (e.key === "Enter" || e.key === "Tab") {
+      if (selectedIndex >= 0) {
+        e.preventDefault();
+        take(buttons[selectedIndex].textContent);
+      }
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      clear();
+    } else {
+      // Any other key means the prefix changed — the input handler will call suggest() and reset selection.
+      selectedIndex = -1;
+    }
+  });
 
   return { suggest, clear };
 }

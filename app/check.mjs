@@ -268,7 +268,8 @@ console.log("  app: the recheck seam throws until wired, then is the wired check
       addEventListener: (type, fn) => listeners.set(id + ":" + type, fn),
       setAttribute: noop, append: noop, appendChild: noop, replaceChildren: noop, remove: noop,
       focus: noop, setSelectionRange: noop, setRangeText: noop, closest: () => null,
-      value: "", hidden: false, disabled: false, className: "", children: [], selectionStart: 0 };
+      value: "", hidden: false, disabled: false, className: "", children: [], selectionStart: 0,
+      querySelectorAll: () => [] };
     Object.defineProperty(b, "textContent", { get: () => recorded[id], set: (v) => { recorded[id] = v; } });
     b.parentElement = b;
     return b;

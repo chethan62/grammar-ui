@@ -139,6 +139,8 @@ textarea { font:inherit; font-size:var(--t-body); color:var(--text); background:
 #candidates { margin-top:var(--s2); }
 /* The model's answer to one row's sentence, tied to that row by a rule down its left edge. */
 .candidates { margin:var(--s1) 0 var(--s2) var(--s3); padding-left:var(--s2); border-left:2px solid var(--border); }
+  .candidates button.flat { display:block; width:100%; text-align:left; padding:2px 8px; border-radius:4px; }
+  .candidates button.flat.selected { background:var(--hover); }
 
 /* Visually hidden but announced: the live region the explicit Check writes to, so typing does not
    narrate a count on every keystroke. */
