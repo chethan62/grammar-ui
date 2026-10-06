@@ -10,7 +10,7 @@ ICONDIR ?= $(HOME)/.local/share/icons/hicolor/scalable/apps
 
 # `dist` is in here because there is a dist/ directory: without it Make reads the target as a file that
 # already exists and skips the recipe entirely ("make: 'dist' is up to date").
-.PHONY: all test check-ui install uninstall dist uninstall-app
+.PHONY: all test check-ui install uninstall dist uninstall-app startup startup-off
 
 all:
 	@echo "Nothing to build. Try: make test | make install"
@@ -90,7 +90,8 @@ install:
 uninstall:
 	-systemctl --user disable --now grammar-watch
 	rm -f $(UNITDIR)/grammar-watch.service
-	rm -f $(BINDIR)/grammar-pause
+	rm -f $(BINDIR)/grammar-lookup $(BINDIR)/grammar-watch $(BINDIR)/grammar-doctor \
+	      $(BINDIR)/grammar-pause $(BINDIR)/grammar_core.py
 	rm -f $(APPDIR)/grammar-lookup.desktop
 	rm -f $(ICONDIR)/grammar-ui.svg
 	-update-desktop-database $(APPDIR) 2>/dev/null
@@ -121,6 +122,25 @@ install-app:
 uninstall-app:
 	rm -f $(BINDIR)/grammar $(APPDIR)/grammar.desktop $(ICONTHEME)/scalable/apps/grammar-ui.svg
 	-update-desktop-database $(APPDIR) 2>/dev/null
+
+# Start at login, or stop starting at login — one command each way, both idempotent. The window comes up
+# through the desktop's own mechanism (a .desktop in the autostart directory, the same entry the menu
+# uses); the engine and watcher through their user units, whose enablement is best-effort here because the
+# engine's unit is installed by its own repo, not this one.
+AUTOSTARTDIR ?= $(HOME)/.config/autostart
+
+startup: install install-app
+	install -d $(AUTOSTARTDIR)
+	sed 's|@BINDIR@|$(BINDIR)|' deployments/grammar.desktop > $(AUTOSTARTDIR)/grammar.desktop
+	chmod 644 $(AUTOSTARTDIR)/grammar.desktop
+	-systemctl --user enable grammar-server grammar-watch 2>/dev/null
+	@echo "Starts at login now: the window, the engine, the watcher."
+	@echo "  Turn it off again: make startup-off"
+
+startup-off:
+	rm -f $(AUTOSTARTDIR)/grammar.desktop
+	-systemctl --user disable grammar-server grammar-watch 2>/dev/null
+	@echo "Nothing starts at login now."
 
 # One package for the whole thing: the engine (with the harper pair it runs), the window and the clients,
 # as a ~/.local-shaped tree — so extracting it into ~/.local IS the install. No root, no package manager,
